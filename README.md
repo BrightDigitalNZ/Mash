@@ -130,6 +130,10 @@ npm run submit:ios
 
 Fill `eas.json` > `submit.production.ios.ascAppId` with the App Store Connect app id first. Dating apps get extra review: have a demo account ready, a written content moderation description, and the block/report flow (it is in `intro/[id]` and `report/[userId]`). The contacts purpose string in `app.json` is specific on purpose; keep it that way.
 
+## Browser demo
+
+`npm run demo:web` exports the app for the web in demo mode and writes `dist-demo/`. Demo mode (`EXPO_PUBLIC_DEMO=1`) swaps Supabase for an in-memory story in `src/lib/demo.ts`: Tin the single with a circle of ten, Holly's fresh lineup, Kim's earlier lineup that led to Ben. Every screen works with no backend, no sign-in and no native modules. Open `dist-demo/index.html` from any static host; `dist-demo/artifact.html` is the same page as a fragment for hosts that wrap it. The build script keeps asset URLs relative and pins the address bar so the page can live at any fixed path.
+
 ## Checks
 
 ```bash
