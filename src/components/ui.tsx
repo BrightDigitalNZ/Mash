@@ -30,6 +30,7 @@ export function Screen({
   contentStyle,
   dark = false,
   edges,
+  refreshControl,
 }: {
   children: React.ReactNode;
   scroll?: boolean;
@@ -38,6 +39,7 @@ export function Screen({
   contentStyle?: StyleProp<ViewStyle>;
   dark?: boolean;
   edges?: ('top' | 'bottom' | 'left' | 'right')[];
+  refreshControl?: React.ReactElement;
 }) {
   const bg = dark ? colors.surfaceInverse : colors.background;
   const inner = [padded && styles.padded, contentStyle];
@@ -48,6 +50,7 @@ export function Screen({
           contentContainerStyle={[styles.scrollContent, inner]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
+          refreshControl={refreshControl}
         >
           {children}
         </ScrollView>

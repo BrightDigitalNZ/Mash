@@ -32,7 +32,7 @@ export async function matchContacts(hashes: string[], myPhoneHash?: string) {
 export interface BuildLineupResult {
   lineupId: string;
   kept: number;
-  dropped: { candidate_id: string; reason: string }[];
+  dropped: { candidate_id: string; first_name: string; reason: string }[];
   note: string;
 }
 

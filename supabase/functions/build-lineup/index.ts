@@ -174,10 +174,11 @@ Deno.serve(
       });
     }
 
+    const nameOf = (id: string) => candidates.find((c) => c.id === id)?.first_name ?? 'Someone';
     return json({
       lineupId: lineup.id,
       kept: result.kept.length,
-      dropped: result.dropped,
+      dropped: result.dropped.map((d) => ({ ...d, first_name: nameOf(d.candidate_id) })),
       note: result.note_to_voucher,
     });
   }),
