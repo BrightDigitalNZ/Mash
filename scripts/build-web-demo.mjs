@@ -13,8 +13,9 @@
 //      host that serves the page at one fixed path, a refresh at /lineup/x would 404 and
 //      relative asset URLs would resolve against the wrong directory. Every history entry
 //      is pinned to the page's own URL instead; Back and Forward still work.
-//   3. Writes `artifact.html`: the page as a fragment (no doctype/html/head/body), which
-//      is what an artifact viewer wraps in its own skeleton. index.html is left as is for
+//   3. Renames _expo/ to bundle/, since some hosts reserve names starting with "_".
+//   4. Writes `artifact.html`: the page as a fragment (no doctype/html/head/body), which
+//      is what an artifact viewer wraps in its own skeleton. index.html keeps working for
 //      ordinary static hosts.
 
 import fs from 'node:fs';
@@ -56,7 +57,16 @@ if (patched === 0) {
   process.exit(2);
 }
 
-// 3. Artifact fragment.
+// 3. Some hosts reserve names starting with "_": move _expo/ to bundle/ and point the page at it.
+const bundleDir = path.join(dir, 'bundle');
+if (fs.existsSync(path.join(dir, '_expo'))) {
+  fs.rmSync(bundleDir, { recursive: true, force: true });
+  fs.renameSync(path.join(dir, '_expo'), bundleDir);
+  const indexPath = path.join(dir, 'index.html');
+  fs.writeFileSync(indexPath, fs.readFileSync(indexPath, 'utf8').replaceAll('/_expo/', '/bundle/'));
+}
+
+// 4. Artifact fragment.
 const html = fs.readFileSync(path.join(dir, 'index.html'), 'utf8');
 const title = /<title>([^<]*)<\/title>/.exec(html)?.[1] ?? 'Mash';
 const style = /<style id="expo-reset">([\s\S]*?)<\/style>/.exec(html)?.[1] ?? '';
@@ -65,7 +75,7 @@ if (!script) {
   console.error('Could not find the bundle script tag in index.html');
   process.exit(3);
 }
-const fragment = `<title>${title}</title>
+const fragment = `<title>${title} demo</title>
 <meta name="description" content="Mash demo with sample data. Nothing here is real." />
 <style>
 ${style.trim()}
