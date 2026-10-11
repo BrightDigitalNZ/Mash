@@ -175,7 +175,7 @@ async function openChat(introId: string) {
     lines.push({
       intro_id: introId,
       sender_id: null,
-      body: `${name(v.voucher_id)} on ${name(v.single_id)}: "${v.text}"`,
+      body: `${name(v.voucher_id)} on ${name(v.single_id)}: ${v.text}`,
       is_vouch: true,
     });
   }
