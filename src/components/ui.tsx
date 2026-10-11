@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
   type PressableProps,
+  type RefreshControlProps,
   type StyleProp,
   type TextInputProps,
   type TextStyle,
@@ -39,7 +40,7 @@ export function Screen({
   contentStyle?: StyleProp<ViewStyle>;
   dark?: boolean;
   edges?: ('top' | 'bottom' | 'left' | 'right')[];
-  refreshControl?: React.ReactElement;
+  refreshControl?: React.ReactElement<RefreshControlProps>;
 }) {
   const bg = dark ? colors.surfaceInverse : colors.background;
   const inner = [padded && styles.padded, contentStyle];
