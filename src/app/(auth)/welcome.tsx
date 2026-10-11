@@ -12,8 +12,9 @@ import { View } from 'react-native';
 import { Body, Button, Caption, Display, Heading, Screen, Stack } from '@/components/ui';
 import { Events, track } from '@/lib/analytics';
 import { isAppleAvailable, signIn, type Provider } from '@/lib/auth';
+import { DEMO } from '@/lib/demo';
 import { supabase } from '@/lib/supabase';
-import { useSession } from '@/store/session';
+import { enterDemo, useSession } from '@/store/session';
 import { colors, palette, spacing } from '@/theme';
 
 function describe(err: unknown): string {
@@ -73,39 +74,66 @@ export default function Welcome() {
           <Body color={palette.plum300}>Just singles your people can actually vouch for.</Body>
         </Stack>
 
-        <Stack gap={spacing.md}>
-          {appleReady ? (
-            <AppleAuthenticationButton
-              buttonType={AppleAuthenticationButtonType.SIGN_IN}
-              buttonStyle={AppleAuthenticationButtonStyle.WHITE}
-              cornerRadius={26}
-              style={{ height: 52, width: '100%', opacity: busy && busy !== 'apple' ? 0.5 : 1 }}
-              onPress={() => go('apple')}
-            />
-          ) : null}
-          <Button
-            title="Continue with Google"
-            variant="secondary"
-            loading={busy === 'google'}
-            disabled={!!busy && busy !== 'google'}
-            onPress={() => go('google')}
-          />
-          <Button
-            title="Continue with Facebook"
-            variant="secondary"
-            loading={busy === 'facebook'}
-            disabled={!!busy && busy !== 'facebook'}
-            onPress={() => go('facebook')}
-          />
-          {error ? (
-            <Caption color={colors.danger} center>
-              {error}
+        {DEMO ? (
+          <Stack gap={spacing.md}>
+            <Caption center color={palette.plum300}>
+              Demo with sample data. Nothing here is real.
             </Caption>
-          ) : null}
-          <Caption center color={palette.plum300} style={{ marginTop: spacing.sm }}>
-            18+ only. By continuing you agree to our Terms and Privacy Policy.
-          </Caption>
-        </Stack>
+            <Button
+              title="See it as Tin, who is single"
+              variant="accent"
+              onPress={() => {
+                enterDemo('tin');
+                router.replace('/');
+              }}
+            />
+            <Button
+              title="See it as Holly, who vouches"
+              variant="secondary"
+              onPress={() => {
+                enterDemo('holly');
+                router.replace('/');
+              }}
+            />
+            <Caption center color={palette.plum300} style={{ marginTop: spacing.sm }}>
+              Sign out from Settings to switch.
+            </Caption>
+          </Stack>
+        ) : (
+          <Stack gap={spacing.md}>
+            {appleReady ? (
+              <AppleAuthenticationButton
+                buttonType={AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={AppleAuthenticationButtonStyle.WHITE}
+                cornerRadius={26}
+                style={{ height: 52, width: '100%', opacity: busy && busy !== 'apple' ? 0.5 : 1 }}
+                onPress={() => go('apple')}
+              />
+            ) : null}
+            <Button
+              title="Continue with Google"
+              variant="secondary"
+              loading={busy === 'google'}
+              disabled={!!busy && busy !== 'google'}
+              onPress={() => go('google')}
+            />
+            <Button
+              title="Continue with Facebook"
+              variant="secondary"
+              loading={busy === 'facebook'}
+              disabled={!!busy && busy !== 'facebook'}
+              onPress={() => go('facebook')}
+            />
+            {error ? (
+              <Caption color={colors.danger} center>
+                {error}
+              </Caption>
+            ) : null}
+            <Caption center color={palette.plum300} style={{ marginTop: spacing.sm }}>
+              18+ only. By continuing you agree to our Terms and Privacy Policy.
+            </Caption>
+          </Stack>
+        )}
       </View>
     </Screen>
   );

@@ -4,6 +4,7 @@ import type { Session } from '@supabase/supabase-js';
 import { create } from 'zustand';
 
 import { identify, resetAnalytics } from '@/lib/analytics';
+import { DEMO, demo, subscribeDemo, type Persona } from '@/lib/demo';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/types/database';
 
@@ -27,6 +28,11 @@ export const useSession = create<SessionState>((set, get) => ({
   setProfile: (profile) => set({ profile }),
 
   refreshProfile: async () => {
+    if (DEMO) {
+      const profile = demo.profile();
+      set({ profile });
+      return profile;
+    }
     const userId = get().session?.user.id;
     if (!userId) {
       set({ profile: null });
@@ -44,6 +50,11 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 
   updateProfile: async (patch) => {
+    if (DEMO) {
+      const profile = { ...demo.patchProfile(patch) };
+      set({ profile });
+      return profile;
+    }
     const userId = get().session?.user.id;
     if (!userId) throw new Error('Not signed in');
     const { data, error } = await supabase
@@ -59,8 +70,31 @@ export const useSession = create<SessionState>((set, get) => ({
   },
 }));
 
+/** Demo only: sign in as one of the story's people. */
+export function enterDemo(persona: Persona) {
+  demo.enter(persona);
+  const profile = demo.profile();
+  useSession.setState({
+    session: { user: { id: persona } } as unknown as Session,
+    profile: profile ? { ...profile } : null,
+    booting: false,
+  });
+}
+
+export function exitDemo() {
+  demo.exit();
+  useSession.setState({ session: null, profile: null });
+}
+
 /** Call once from the root layout. Keeps the store in step with Supabase auth. */
 export function bootSession(): () => void {
+  if (DEMO) {
+    useSession.setState({ booting: false });
+    return subscribeDemo(() => {
+      const profile = demo.profile();
+      if (profile) useSession.setState({ profile: { ...profile } });
+    });
+  }
   const store = useSession.getState();
 
   supabase.auth

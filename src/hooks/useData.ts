@@ -4,6 +4,7 @@
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
+import { DEMO, demo, subscribeDemo } from '@/lib/demo';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/store/session';
 import type {
@@ -76,6 +77,11 @@ function useRealtime(
 ) {
   const qc = useQueryClient();
   useEffect(() => {
+    if (DEMO) {
+      return subscribeDemo(() => {
+        for (const key of invalidate) qc.invalidateQueries({ queryKey: [...key] });
+      });
+    }
     const ch = supabase
       .channel(channel)
       .on(
@@ -97,11 +103,14 @@ function useRealtime(
 
 export function useCircle(): UseQueryResult<CircleRow[]> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`circle-${userId}`, 'vouches', userId ? `single_id=eq.${userId}` : undefined, [keys.circle]);
+  useRealtime(`circle-${userId}`, 'vouches', userId ? `single_id=eq.${userId}` : undefined, [
+    keys.circle,
+  ]);
   return useQuery({
     queryKey: keys.circle,
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.circle();
       const { data, error } = await supabase.rpc('my_circle');
       if (error) throw error;
       return (data ?? []) as CircleRow[];
@@ -114,6 +123,7 @@ export function useCriteria(singleId: string | undefined) {
     queryKey: keys.criteria(singleId ?? ''),
     enabled: !!singleId,
     queryFn: async () => {
+      if (DEMO) return demo.criteria(singleId!);
       const { data, error } = await supabase
         .from('criteria')
         .select('*')
@@ -132,13 +142,16 @@ export interface LineupWithPeople extends Lineup {
   comments: LineupComment[];
 }
 
-export function useLineups(): UseQueryResult<(Lineup & { voucher: PublicProfile; single: PublicProfile; kept: number })[]> {
+export function useLineups(): UseQueryResult<
+  (Lineup & { voucher: PublicProfile; single: PublicProfile; kept: number })[]
+> {
   const userId = useSession((s) => s.session?.user.id);
   useRealtime(`lineups-${userId}`, 'lineups', undefined, [keys.lineups]);
   return useQuery({
     queryKey: keys.lineups,
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.lineups();
       const { data, error } = await supabase
         .from('lineups')
         .select('*, voucher:voucher_id(*), single:single_id(*), entries:lineup_entries(id, kept)')
@@ -158,12 +171,17 @@ export function useLineups(): UseQueryResult<(Lineup & { voucher: PublicProfile;
 }
 
 export function useLineup(id: string | undefined): UseQueryResult<LineupWithPeople | null> {
-  useRealtime(`lineup-entries-${id}`, 'lineup_entries', id ? `lineup_id=eq.${id}` : undefined, [keys.lineup(id ?? '')]);
-  useRealtime(`lineup-comments-${id}`, 'lineup_comments', id ? `lineup_id=eq.${id}` : undefined, [keys.lineup(id ?? '')]);
+  useRealtime(`lineup-entries-${id}`, 'lineup_entries', id ? `lineup_id=eq.${id}` : undefined, [
+    keys.lineup(id ?? ''),
+  ]);
+  useRealtime(`lineup-comments-${id}`, 'lineup_comments', id ? `lineup_id=eq.${id}` : undefined, [
+    keys.lineup(id ?? ''),
+  ]);
   return useQuery({
     queryKey: keys.lineup(id ?? ''),
     enabled: !!id,
     queryFn: async () => {
+      if (DEMO) return demo.lineup(id!);
       const { data, error } = await supabase
         .from('lineups')
         .select(
@@ -207,12 +225,17 @@ export function useIntros(): UseQueryResult<IntroWithPeople[]> {
     queryKey: keys.intros,
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.intros();
       const { data, error } = await supabase
         .from('introductions')
         .select('*, single:single_id(*), candidate:candidate_id(*), messages(*)')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      const rows = (data ?? []) as (Introduction & { single: Profile; candidate: Profile; messages: Message[] })[];
+      const rows = (data ?? []) as (Introduction & {
+        single: Profile;
+        candidate: Profile;
+        messages: Message[];
+      })[];
       const voucherIds = Array.from(new Set(rows.flatMap((r) => r.voucher_ids)));
       const { data: vouchers } = voucherIds.length
         ? await supabase.from('profiles').select('*').in('id', voucherIds)
@@ -221,7 +244,9 @@ export function useIntros(): UseQueryResult<IntroWithPeople[]> {
       return rows.map((r) => {
         const single = toPublic(r.single);
         const candidate = toPublic(r.candidate);
-        const msgs = [...(r.messages ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at));
+        const msgs = [...(r.messages ?? [])].sort((a, b) =>
+          a.created_at.localeCompare(b.created_at),
+        );
         return {
           ...r,
           single,
@@ -237,11 +262,15 @@ export function useIntros(): UseQueryResult<IntroWithPeople[]> {
 
 export function useIntro(id: string | undefined): UseQueryResult<IntroWithPeople | null> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`intro-${id}`, 'introductions', id ? `id=eq.${id}` : undefined, [keys.intro(id ?? ''), keys.intros]);
+  useRealtime(`intro-${id}`, 'introductions', id ? `id=eq.${id}` : undefined, [
+    keys.intro(id ?? ''),
+    keys.intros,
+  ]);
   return useQuery({
     queryKey: keys.intro(id ?? ''),
     enabled: !!id && !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.intro(id!);
       const { data, error } = await supabase
         .from('introductions')
         .select('*, single:single_id(*), candidate:candidate_id(*)')
@@ -275,6 +304,7 @@ export function useMessages(introId: string | undefined): UseQueryResult<Message
     queryKey: keys.messages(introId ?? ''),
     enabled: !!introId,
     queryFn: async () => {
+      if (DEMO) return demo.messages(introId!);
       const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -291,6 +321,7 @@ export function useBrief(introId: string | undefined, subjectId: string | undefi
     queryKey: keys.brief(introId ?? '', subjectId ?? ''),
     enabled: !!introId && !!subjectId,
     queryFn: async () => {
+      if (DEMO) return demo.brief(introId!, subjectId!);
       const { data, error } = await supabase
         .from('briefs')
         .select('*')
@@ -309,6 +340,7 @@ export function useVouchesFor(singleId: string | undefined) {
     queryKey: keys.vouchesFor(singleId ?? ''),
     enabled: !!singleId,
     queryFn: async () => {
+      if (DEMO) return demo.vouchesFor(singleId!);
       const { data, error } = await supabase
         .from('vouches')
         .select('*, voucher:voucher_id(first_name, photo_url)')
@@ -332,11 +364,14 @@ export function useVouchesFor(singleId: string | undefined) {
 
 export function useMySingles(): UseQueryResult<MySingleRow[]> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`mysingles-${userId}`, 'vouches', userId ? `voucher_id=eq.${userId}` : undefined, [keys.mySingles]);
+  useRealtime(`mysingles-${userId}`, 'vouches', userId ? `voucher_id=eq.${userId}` : undefined, [
+    keys.mySingles,
+  ]);
   return useQuery({
     queryKey: keys.mySingles,
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.mySingles();
       const { data, error } = await supabase.rpc('my_singles');
       if (error) throw error;
       return (data ?? []) as MySingleRow[];
@@ -351,6 +386,7 @@ export function useRecord(): UseQueryResult<RecordRow[]> {
     queryKey: keys.record,
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.record();
       const { data, error } = await supabase.rpc('my_record');
       if (error) throw error;
       return (data ?? []) as RecordRow[];
@@ -363,6 +399,7 @@ export function useNominatable(singleId: string | undefined): UseQueryResult<Nom
     queryKey: keys.nominatable(singleId ?? ''),
     enabled: !!singleId,
     queryFn: async () => {
+      if (DEMO) return demo.nominatable(singleId!);
       const { data, error } = await supabase.rpc('nominatable_for', { single: singleId! });
       if (error) throw error;
       return (data ?? []) as NominatableRow[];
@@ -375,6 +412,7 @@ export function useVouchPrompt(): UseQueryResult<VouchPrompt> {
     queryKey: keys.prompt,
     staleTime: 60 * 60 * 1000,
     queryFn: async () => {
+      if (DEMO) return demo.prompt();
       const { data, error } = await supabase.rpc('current_vouch_prompt');
       if (error) throw error;
       return data as VouchPrompt;
@@ -389,13 +427,20 @@ export function useConnections(): UseQueryResult<(PublicProfile & { role: Profil
     queryKey: ['connections', userId],
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.connections();
       const { data, error } = await supabase.from('connections').select('user_a, user_b');
       if (error) throw error;
       const ids = (data ?? []).map((c) => (c.user_a === userId ? c.user_b : c.user_a));
       if (ids.length === 0) return [];
-      const { data: profiles, error: pErr } = await supabase.from('profiles').select('*').in('id', ids);
+      const { data: profiles, error: pErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .in('id', ids);
       if (pErr) throw pErr;
-      return (profiles ?? []).map((p) => ({ ...toPublic(p as Profile), role: (p as Profile).role }));
+      return (profiles ?? []).map((p) => ({
+        ...toPublic(p as Profile),
+        role: (p as Profile).role,
+      }));
     },
   });
 }
@@ -407,7 +452,12 @@ export function useProfile(id: string | undefined): UseQueryResult<PublicProfile
     queryKey: keys.profile(id ?? ''),
     enabled: !!id,
     queryFn: async () => {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', id!).maybeSingle();
+      if (DEMO) return demo.publicProfile(id!);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', id!)
+        .maybeSingle();
       if (error) throw error;
       return data ? toPublic(data as Profile) : null;
     },
@@ -419,6 +469,7 @@ export function useLinkedProfiles(userId: string | undefined): UseQueryResult<Li
     queryKey: keys.linked(userId ?? ''),
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.linked(userId!);
       const { data, error } = await supabase
         .from('linked_profiles')
         .select('*')
@@ -432,13 +483,17 @@ export function useLinkedProfiles(userId: string | undefined): UseQueryResult<Li
 
 export function useNotifications(): UseQueryResult<Notification[]> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`notifications-${userId}`, 'notifications', userId ? `user_id=eq.${userId}` : undefined, [
-    keys.notifications,
-  ]);
+  useRealtime(
+    `notifications-${userId}`,
+    'notifications',
+    userId ? `user_id=eq.${userId}` : undefined,
+    [keys.notifications],
+  );
   return useQuery({
     queryKey: keys.notifications,
     enabled: !!userId,
     queryFn: async () => {
+      if (DEMO) return demo.notifications();
       const { data, error } = await supabase
         .from('notifications')
         .select('*')

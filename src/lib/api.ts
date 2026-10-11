@@ -3,6 +3,7 @@
 import { Share } from 'react-native';
 
 import { Events, track } from './analytics';
+import { DEMO, demoApi } from './demo';
 import { callFunction, supabase } from './supabase';
 import { statusForOutcome } from '../../supabase/functions/_shared/rules';
 import type {
@@ -24,6 +25,7 @@ export interface MatchContactsResult {
 }
 
 export async function matchContacts(hashes: string[], myPhoneHash?: string) {
+  if (DEMO) return demoApi.matchContacts(hashes, myPhoneHash);
   const res = await callFunction<MatchContactsResult>('match-contacts', { hashes, myPhoneHash });
   track(Events.contactsMatched, { matched: res.matched.length, hashes: hashes.length });
   return res;
@@ -37,6 +39,7 @@ export interface BuildLineupResult {
 }
 
 export async function buildLineup(singleId: string, candidateIds: string[]) {
+  if (DEMO) return demoApi.buildLineup(singleId, candidateIds);
   track(Events.lineupRequested, { nominated: candidateIds.length });
   return callFunction<BuildLineupResult>('build-lineup', { singleId, candidateIds });
 }
@@ -44,6 +47,7 @@ export async function buildLineup(singleId: string, candidateIds: string[]) {
 export type Decision = Exclude<EntryDecision, 'undecided'>;
 
 export async function decideEntry(entryId: string, decision: Decision) {
+  if (DEMO) return demoApi.decideEntry(entryId, decision);
   track(Events.entryDecided, { decision });
   return callFunction<{ introId?: string; status?: IntroStatus; ok?: boolean }>('decide', {
     entryId,
@@ -52,6 +56,7 @@ export async function decideEntry(entryId: string, decision: Decision) {
 }
 
 export async function decideIntro(introId: string, decision: Decision) {
+  if (DEMO) return demoApi.decideIntro(introId, decision);
   track(Events.entryDecided, { decision, reverse: true });
   const res = await callFunction<{ introId: string; status: IntroStatus }>('decide', {
     introId,
@@ -62,6 +67,7 @@ export async function decideIntro(introId: string, decision: Decision) {
 }
 
 export async function generateBrief(introId: string) {
+  if (DEMO) return demoApi.generateBrief(introId);
   return callFunction<{ brief: Pick<Brief, 'id' | 'content' | 'subject_approved'> }>('brief', {
     introId,
     action: 'generate',
@@ -69,6 +75,7 @@ export async function generateBrief(introId: string) {
 }
 
 export async function approveBrief(introId: string) {
+  if (DEMO) return demoApi.approveBrief(introId);
   return callFunction<{ ok: true }>('brief', { introId, action: 'approve' });
 }
 
@@ -85,6 +92,7 @@ export async function saveCriteria(
     open_text: string | null;
   },
 ) {
+  if (DEMO) return demoApi.saveCriteria(singleId, criteria);
   const { data, error } = await supabase
     .from('criteria')
     .upsert({ single_id: singleId, ...criteria }, { onConflict: 'single_id' })
@@ -96,6 +104,7 @@ export async function saveCriteria(
 }
 
 export async function uploadAvatar(userId: string, localUri: string): Promise<string> {
+  if (DEMO) return demoApi.uploadAvatar(userId, localUri);
   const res = await fetch(localUri);
   const blob = await res.arrayBuffer();
   const path = `${userId}/${Date.now()}.jpg`;
@@ -117,6 +126,7 @@ export async function writeVouch(args: {
   text: string;
   howKnown?: string | null;
 }) {
+  if (DEMO) return demoApi.writeVouch(args);
   const { error } = await supabase.from('vouches').upsert(
     {
       voucher_id: args.voucherId,
@@ -133,6 +143,7 @@ export async function writeVouch(args: {
 }
 
 export async function removeVouch(voucherId: string, singleId: string) {
+  if (DEMO) return demoApi.removeVouch(voucherId, singleId);
   const { error } = await supabase
     .from('vouches')
     .delete()
@@ -152,6 +163,7 @@ export async function inviteByHash(args: {
   nomineeName: string;
   message: string;
 }) {
+  if (DEMO) return demoApi.inviteByHash(args);
   const { data, error } = await supabase
     .from('nominations')
     .upsert(
@@ -182,6 +194,7 @@ export async function commentOnLineup(args: {
   authorId: string;
   text: string;
 }) {
+  if (DEMO) return demoApi.commentOnLineup(args);
   const { error } = await supabase.from('lineup_comments').insert({
     lineup_id: args.lineupId,
     entry_id: args.entryId,
@@ -193,6 +206,7 @@ export async function commentOnLineup(args: {
 }
 
 export async function markRevealed(entryId: string) {
+  if (DEMO) return demoApi.markRevealed(entryId);
   await supabase
     .from('lineup_entries')
     .update({ revealed_at: new Date().toISOString() })
@@ -202,6 +216,7 @@ export async function markRevealed(entryId: string) {
 
 /** The voucher may bring back one dropped person. */
 export async function overrideDrop(entryId: string) {
+  if (DEMO) return demoApi.overrideDrop(entryId);
   const { error } = await supabase
     .from('lineup_entries')
     .update({ kept: true, voucher_overrode: true, rank: 99 })
@@ -212,6 +227,7 @@ export async function overrideDrop(entryId: string) {
 // --- chat and outcomes ------------------------------------------------------
 
 export async function sendMessage(introId: string, senderId: string, body: string) {
+  if (DEMO) return demoApi.sendMessage(introId, senderId, body);
   const { error } = await supabase
     .from('messages')
     .insert({ intro_id: introId, sender_id: senderId, body: body.trim() });
@@ -225,6 +241,7 @@ export async function reportOutcome(args: {
   note?: string;
   whenAt?: string;
 }) {
+  if (DEMO) return demoApi.reportOutcome(args);
   const { error } = await supabase.from('outcomes').insert({
     intro_id: args.introId,
     reported_by: args.reportedBy,
@@ -241,6 +258,7 @@ export async function reportOutcome(args: {
 }
 
 export async function unmatch(introId: string) {
+  if (DEMO) return demoApi.unmatch(introId);
   const { error } = await supabase
     .from('introductions')
     .update({ status: 'closed', closed_at: new Date().toISOString() })
@@ -251,6 +269,7 @@ export async function unmatch(introId: string) {
 // --- safety -----------------------------------------------------------------
 
 export async function blockUser(blockerId: string, blockedId: string) {
+  if (DEMO) return demoApi.blockUser(blockerId, blockedId);
   const { error } = await supabase
     .from('blocks')
     .upsert({ blocker_id: blockerId, blocked_id: blockedId });
@@ -264,6 +283,7 @@ export async function reportUser(args: {
   reason: string;
   details?: string;
 }) {
+  if (DEMO) return demoApi.reportUser(args);
   const { error } = await supabase.from('reports').insert({
     reporter_id: args.reporterId,
     reported_id: args.reportedId,
@@ -277,6 +297,7 @@ export async function reportUser(args: {
 // --- linked profiles (for the consent-first brief) --------------------------
 
 export async function addLinkedProfile(userId: string, kind: LinkedKind, url: string) {
+  if (DEMO) return demoApi.addLinkedProfile(userId, kind, url);
   const { error } = await supabase
     .from('linked_profiles')
     .upsert({ user_id: userId, kind, url: url.trim() }, { onConflict: 'user_id,url' });
@@ -284,6 +305,7 @@ export async function addLinkedProfile(userId: string, kind: LinkedKind, url: st
 }
 
 export async function removeLinkedProfile(id: string) {
+  if (DEMO) return demoApi.removeLinkedProfile(id);
   const { error } = await supabase.from('linked_profiles').delete().eq('id', id);
   if (error) throw error;
 }
@@ -291,6 +313,7 @@ export async function removeLinkedProfile(id: string) {
 // --- notifications ----------------------------------------------------------
 
 export async function markNotificationsRead(ids: string[]) {
+  if (DEMO) return demoApi.markNotificationsRead(ids);
   if (ids.length === 0) return;
   await supabase.from('notifications').update({ read: true }).in('id', ids);
 }

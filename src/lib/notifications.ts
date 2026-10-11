@@ -7,21 +7,23 @@ import { Platform } from 'react-native';
 
 import { supabase } from './supabase';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 /**
  * Ask once, register the Expo push token against the signed-in user.
  * Returns the token or null when running on a simulator or permission was declined.
  */
 export async function registerForPush(userId: string): Promise<string | null> {
-  if (!Device.isDevice) return null;
+  if (Platform.OS === 'web' || !Device.isDevice) return null;
 
   const existing = await Notifications.getPermissionsAsync();
   let status = existing.status;
@@ -50,6 +52,7 @@ export type PushData = {
 
 /** Subscribe to taps on notifications. Returns an unsubscribe function. */
 export function onNotificationTap(handler: (data: PushData) => void): () => void {
+  if (Platform.OS === 'web') return () => {};
   const sub = Notifications.addNotificationResponseReceivedListener((response) => {
     const data = response.notification.request.content.data as PushData | undefined;
     handler(data ?? {});
@@ -59,6 +62,7 @@ export function onNotificationTap(handler: (data: PushData) => void): () => void
 
 /** If the app was opened from a notification, return its data once. */
 export async function getInitialNotificationData(): Promise<PushData | null> {
+  if (Platform.OS === 'web') return null;
   const last = await Notifications.getLastNotificationResponseAsync();
   const data = last?.notification.request.content.data as PushData | undefined;
   return data ?? null;

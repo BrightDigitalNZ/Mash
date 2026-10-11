@@ -104,6 +104,10 @@ function VouchForm({
   const trimmed = text.trim();
   const canSave = trimmed.length >= MIN && trimmed.length <= MAX;
   const firstName = single?.first_name ?? 'your friend';
+  // An existing vouch answers the prompt it was written to. Editing keeps that prompt rather than
+  // silently re-filing the old sentence under this week's question.
+  const promptId = existing ? existing.prompt_id : prompt.id;
+  const promptText = existing ? existing.prompt : prompt.text;
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: keys.mySingles });
@@ -119,8 +123,8 @@ function VouchForm({
       await writeVouch({
         voucherId: me,
         singleId,
-        promptId: prompt.id,
-        prompt: prompt.text,
+        promptId,
+        prompt: promptText,
         text: trimmed,
         howKnown: howKnown.trim() || null,
       });
@@ -170,8 +174,10 @@ function VouchForm({
       </Stack>
 
       <Stack gap={spacing.xs}>
-        <Heading>{prompt.text}</Heading>
-        <Caption>This week&apos;s prompt. New one next week.</Caption>
+        <Heading>{promptText}</Heading>
+        <Caption>
+          {existing ? 'The prompt you answered.' : "This week's prompt. New one next week."}
+        </Caption>
       </Stack>
 
       <Field

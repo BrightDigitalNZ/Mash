@@ -48,3 +48,4 @@ yarn-error.*
 # supabase local
 supabase/.branches
 supabase/.temp
+dist-demo/

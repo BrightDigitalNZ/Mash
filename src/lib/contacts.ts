@@ -5,6 +5,7 @@
 import { Contact, ContactField, requestPermissionsAsync, getPermissionsAsync } from 'expo-contacts';
 import * as Crypto from 'expo-crypto';
 
+import { DEMO, demo } from '@/lib/demo';
 import type { CountryCode } from '@/types/database';
 
 const COUNTRY_DIAL: Record<CountryCode, string> = { NZ: '64', AU: '61' };
@@ -46,6 +47,7 @@ export interface LocalContact {
 }
 
 export async function ensureContactsPermission(): Promise<boolean> {
+  if (DEMO) return true;
   const current = await getPermissionsAsync();
   if (current.granted) return true;
   if (!current.canAskAgain) return false;
@@ -58,6 +60,7 @@ export async function ensureContactsPermission(): Promise<boolean> {
  * Names and images stay in memory on the device for the nominate screen only.
  */
 export async function readHashedContacts(country: CountryCode = 'NZ'): Promise<LocalContact[]> {
+  if (DEMO) return demo.contacts();
   const details = await Contact.getAllDetails([
     ContactField.GIVEN_NAME,
     ContactField.FAMILY_NAME,

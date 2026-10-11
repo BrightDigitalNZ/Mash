@@ -1,5 +1,5 @@
 import 'react-native-url-polyfill/auto';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, FunctionsHttpError, type SupabaseClient } from '@supabase/supabase-js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState } from 'react-native';
 
@@ -45,7 +45,18 @@ export async function callFunction<TResponse, TBody extends object = Record<stri
 ): Promise<TResponse> {
   const { data, error } = await supabase.functions.invoke<TResponse>(name, { body });
   if (error) {
-    throw new Error(error.message ?? `Function ${name} failed`);
+    // A non-2xx reply carries the function's own `{ error: message }` body (for example
+    // "3 more vouchers needed before lineups unlock"). Surface that, not the generic wrapper text.
+    let serverMessage: string | null = null;
+    if (error instanceof FunctionsHttpError && error.context instanceof Response) {
+      try {
+        const payload = (await error.context.json()) as { error?: unknown };
+        if (typeof payload?.error === 'string' && payload.error) serverMessage = payload.error;
+      } catch {
+        // not JSON; fall through to the generic message
+      }
+    }
+    throw new Error(serverMessage ?? error.message ?? `Function ${name} failed`);
   }
   return data as TResponse;
 }

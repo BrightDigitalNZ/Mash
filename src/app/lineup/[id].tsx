@@ -46,9 +46,11 @@ function whenMade(iso: string): string {
 }
 
 function BackButton() {
+  const role = useSession((s) => s.profile?.role);
+  const home = role === 'voucher' ? '/(voucher)/friends' : '/(single)/circle';
   return (
     <Pressable
-      onPress={() => (router.canGoBack() ? router.back() : router.replace('/(single)/circle'))}
+      onPress={() => (router.canGoBack() ? router.back() : router.replace(home))}
       accessibilityRole="button"
       accessibilityLabel="Back"
       hitSlop={12}
@@ -246,7 +248,9 @@ function SingleReveal({ lineup }: { lineup: LineupWithPeople }) {
   const c = entry.candidate;
   const quoteText = voucherVouch?.text ?? entry.reason ?? `${lineup.voucher.first_name} put ${c.first_name} forward for you.`;
   const reasonLine = voucherVouch ? entry.reason : null;
-  const decided = entry.decision !== 'undecided';
+  // A maybe is a decision to come back to, so it keeps the buttons. Meet and not-this-time are final.
+  const settled = entry.decision === 'meet' || entry.decision === 'not_this_time';
+  const nextTitle = index + 1 < kept.length ? 'Next' : 'Finish';
 
   return (
     <Screen>
@@ -284,18 +288,28 @@ function SingleReveal({ lineup }: { lineup: LineupWithPeople }) {
                 </Body>
               ) : null}
               <Divider />
-              {decided ? (
+              {settled ? (
                 <Stack gap={spacing.md} align="center" style={{ alignSelf: 'stretch' }}>
                   <Stack row gap={spacing.sm} align="center">
                     <Caption>You said</Caption>
                     <DecisionBadge decision={entry.decision} />
                   </Stack>
-                  <Button title={index + 1 < kept.length ? 'Next' : 'Finish'} variant="secondary" onPress={next} />
+                  <Button title={nextTitle} variant="secondary" onPress={next} />
                 </Stack>
               ) : (
                 <Stack gap={spacing.sm} style={{ alignSelf: 'stretch' }}>
+                  {entry.decision === 'maybe' ? (
+                    <Stack row gap={spacing.sm} align="center" justify="center">
+                      <Caption>You said</Caption>
+                      <DecisionBadge decision={entry.decision} />
+                    </Stack>
+                  ) : null}
                   <Button title="Meet" variant="accent" onPress={() => decide('meet')} loading={busy === 'meet'} disabled={!!busy} />
-                  <Button title="Maybe" variant="secondary" onPress={() => decide('maybe')} loading={busy === 'maybe'} disabled={!!busy} />
+                  {entry.decision === 'maybe' ? (
+                    <Button title={nextTitle} variant="secondary" onPress={next} disabled={!!busy} />
+                  ) : (
+                    <Button title="Maybe" variant="secondary" onPress={() => decide('maybe')} loading={busy === 'maybe'} disabled={!!busy} />
+                  )}
                   <Button
                     title="Not this time"
                     variant="ghost"

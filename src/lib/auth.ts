@@ -7,7 +7,9 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
+import { DEMO } from './demo';
 import { supabase } from './supabase';
+import { exitDemo } from '@/store/session';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -23,10 +25,7 @@ export async function isAppleAvailable(): Promise<boolean> {
 /** Native Sign in with Apple, then exchange the identity token with Supabase. */
 export async function signInWithApple(): Promise<void> {
   const rawNonce = Crypto.randomUUID();
-  const hashedNonce = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    rawNonce,
-  );
+  const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, rawNonce);
 
   const credential = await AppleAuthentication.signInAsync({
     requestedScopes: [
@@ -91,11 +90,19 @@ export async function signIn(provider: Provider): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
+  if (DEMO) {
+    exitDemo();
+    return;
+  }
   await supabase.auth.signOut();
 }
 
 /** Irreversible. Removes the auth user, which cascades through every table. */
 export async function deleteAccount(): Promise<void> {
+  if (DEMO) {
+    exitDemo();
+    return;
+  }
   const { error } = await supabase.rpc('delete_my_account');
   if (error) throw error;
   await supabase.auth.signOut();

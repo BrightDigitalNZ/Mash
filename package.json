@@ -1,7 +1,7 @@
 {
   "name": "mash",
   "version": "0.1.0",
-  "main": "expo-router/entry",
+  "main": "./index.tsx",
   "dependencies": {
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -10,6 +10,7 @@
     "expo": "~57.0.27",
     "expo-apple-authentication": "~57.0.2",
     "expo-application": "~57.0.3",
+    "expo-asset": "~57.0.19",
     "expo-auth-session": "~57.0.14",
     "expo-constants": "~57.0.21",
     "expo-contacts": "~57.0.6",
@@ -72,7 +73,8 @@
     "submit:ios": "eas submit --platform ios",
     "db:push": "supabase db push",
     "functions:deploy": "supabase functions deploy",
-    "typecheck:functions": "tsc -p tsconfig.functions.json"
+    "typecheck:functions": "tsc -p tsconfig.functions.json",
+    "demo:web": "EXPO_PUBLIC_DEMO=1 expo export --platform web --output-dir dist-demo && node scripts/build-web-demo.mjs dist-demo"
   },
   "private": true,
   "jest": {

@@ -18,6 +18,7 @@ import {
 import { uploadAvatar } from '@/lib/api';
 import { useSession } from '@/store/session';
 import { colors, spacing } from '@/theme';
+import type { CountryCode } from '@/types/database';
 
 const CITIES = [
   'Auckland',
@@ -27,6 +28,16 @@ const CITIES = [
   'Melbourne',
   'Brisbane',
 ] as const;
+
+// Moving between the preset cities crosses a border; keep `country` in step with `city`.
+const CITY_COUNTRY: Record<(typeof CITIES)[number], CountryCode> = {
+  Auckland: 'NZ',
+  Wellington: 'NZ',
+  Christchurch: 'NZ',
+  Sydney: 'AU',
+  Melbourne: 'AU',
+  Brisbane: 'AU',
+};
 const BIO_MAX = 240;
 
 export default function ProfileSettings() {
@@ -75,11 +86,16 @@ export default function ProfileSettings() {
     setSaving(true);
     setError(null);
     try {
+      const trimmedCity = city.trim();
+      const presetCountry = (CITIES as readonly string[]).includes(trimmedCity)
+        ? CITY_COUNTRY[trimmedCity as (typeof CITIES)[number]]
+        : null;
       await updateProfile({
         first_name: firstName.trim(),
         last_name: lastName.trim(),
-        city: city.trim(),
+        city: trimmedCity,
         bio: bio.trim() || null,
+        ...(presetCountry ? { country: presetCountry } : {}),
       });
       router.back();
     } catch (e) {
