@@ -19,7 +19,7 @@ import type {
 // --- edge functions ---------------------------------------------------------
 
 export interface MatchContactsResult {
-  matched: (PublicProfile & { role: 'single' | 'voucher' | null })[];
+  matched: (PublicProfile & { role: 'single' | 'voucher' | null; hash: string | null })[];
   pendingInvites: { voucher_first_name: string; invite_message: string | null }[];
 }
 

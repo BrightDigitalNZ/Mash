@@ -1,10 +1,11 @@
 // Five questions, nothing more. Everything else comes from the vouches.
-// Used in onboarding and again from settings, so it owns its own save and footer.
+// Used in onboarding and again from settings. Content only: the parent Screen owns scrolling
+// and padding, so the save button sits at the end of the form.
 
 import { useState, type ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import { View } from 'react-native';
 
-import { Body, Button, Caption, Chip, Field, Footer, Heading, Stack } from '@/components/ui';
+import { Body, Button, Caption, Chip, Field, Heading, Stack } from '@/components/ui';
 import { saveCriteria } from '@/lib/api';
 import { colors, spacing } from '@/theme';
 import type { Criteria, IntentKind } from '@/types/database';
@@ -81,7 +82,9 @@ export default function CriteriaForm({
   const ownDealbreakers = dealbreakers.filter((d) => !DEALBREAKERS.includes(d));
 
   function toggleDealbreaker(item: string) {
-    setDealbreakers((list) => (list.includes(item) ? list.filter((d) => d !== item) : [...list, item]));
+    setDealbreakers((list) =>
+      list.includes(item) ? list.filter((d) => d !== item) : [...list, item],
+    );
   }
 
   function addCustom() {
@@ -128,101 +131,115 @@ export default function CriteriaForm({
   }
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView
-        contentContainerStyle={{ paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing.xl }}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <Stack gap={spacing.xxl}>
-          <Section title="Age range">
-            <Stack row gap={spacing.md} align="flex-end">
-              <Field
-                style={{ flex: 1 }}
-                label="From"
-                value={ageMin}
-                onChangeText={(t) => setAgeMin(t.replace(/\D/g, '').slice(0, 2))}
-                onBlur={normaliseAges}
-                keyboardType="number-pad"
-                maxLength={2}
-                accessibilityLabel="Youngest age"
-              />
-              <Body color={colors.textMuted} style={{ paddingBottom: spacing.lg }}>
-                to
-              </Body>
-              <Field
-                style={{ flex: 1 }}
-                label="To"
-                value={ageMax}
-                onChangeText={(t) => setAgeMax(t.replace(/\D/g, '').slice(0, 2))}
-                onBlur={normaliseAges}
-                keyboardType="number-pad"
-                maxLength={2}
-                accessibilityLabel="Oldest age"
-              />
-            </Stack>
-            <Caption>Between {AGE_FLOOR} and {AGE_CEIL}.</Caption>
-          </Section>
-
-          <Section title="Distance">
-            <Stack row wrap gap={spacing.sm}>
-              {DISTANCES.map((d) => (
-                <Chip key={d.km} label={d.label} selected={radius === d.km} onPress={() => setRadius(d.km)} />
-              ))}
-            </Stack>
-          </Section>
-
-          <Section title="Dealbreakers">
-            <Caption>Tap any that apply. Leave them all if nothing is a hard no.</Caption>
-            <Stack row wrap gap={spacing.sm}>
-              {DEALBREAKERS.map((d) => (
-                <Chip key={d} label={d} selected={dealbreakers.includes(d)} onPress={() => toggleDealbreaker(d)} />
-              ))}
-              {ownDealbreakers.map((d) => (
-                <Chip key={d} label={d} selected onPress={() => toggleDealbreaker(d)} />
-              ))}
-            </Stack>
+    <View>
+      <Stack gap={spacing.xxl}>
+        <Section title="Age range">
+          <Stack row gap={spacing.md} align="flex-end">
             <Field
-              label="Add your own"
-              placeholder="Something that would end it for you"
-              value={custom}
-              onChangeText={setCustom}
-              onSubmitEditing={addCustom}
-              returnKeyType="done"
-              maxLength={40}
+              style={{ flex: 1 }}
+              label="From"
+              value={ageMin}
+              onChangeText={(t) => setAgeMin(t.replace(/\D/g, '').slice(0, 2))}
+              onBlur={normaliseAges}
+              keyboardType="number-pad"
+              maxLength={2}
+              accessibilityLabel="Youngest age"
             />
-            {custom.trim() ? <Button title="Add" variant="secondary" small full={false} onPress={addCustom} /> : null}
-          </Section>
-
-          <Section title="What do you want this to be?">
-            <Stack row wrap gap={spacing.sm}>
-              {INTENTS.map((i) => (
-                <Chip key={i.value} label={i.label} selected={intent === i.value} onPress={() => setIntent(i.value)} />
-              ))}
-            </Stack>
-          </Section>
-
-          <Section title="One line for the matchmaker">
+            <Body color={colors.textMuted} style={{ paddingBottom: spacing.lg }}>
+              to
+            </Body>
             <Field
-              multiline
-              placeholder="Something your friends would say about what you're after."
-              value={openText}
-              onChangeText={(t) => setOpenText(t.slice(0, OPEN_MAX))}
-              maxLength={OPEN_MAX}
-              hint={`${openText.length}/${OPEN_MAX}`}
-              accessibilityLabel="One line for the matchmaker"
+              style={{ flex: 1 }}
+              label="To"
+              value={ageMax}
+              onChangeText={(t) => setAgeMax(t.replace(/\D/g, '').slice(0, 2))}
+              onBlur={normaliseAges}
+              keyboardType="number-pad"
+              maxLength={2}
+              accessibilityLabel="Oldest age"
             />
-          </Section>
+          </Stack>
+          <Caption>
+            Between {AGE_FLOOR} and {AGE_CEIL}.
+          </Caption>
+        </Section>
 
-          <View>
-            <Caption>Everything else the matchmaker works out from your friends&apos; vouches, not a questionnaire.</Caption>
-          </View>
+        <Section title="Distance">
+          <Stack row wrap gap={spacing.sm}>
+            {DISTANCES.map((d) => (
+              <Chip
+                key={d.km}
+                label={d.label}
+                selected={radius === d.km}
+                onPress={() => setRadius(d.km)}
+              />
+            ))}
+          </Stack>
+        </Section>
+
+        <Section title="Dealbreakers">
+          <Caption>Tap any that apply. Leave them all if nothing is a hard no.</Caption>
+          <Stack row wrap gap={spacing.sm}>
+            {DEALBREAKERS.map((d) => (
+              <Chip
+                key={d}
+                label={d}
+                selected={dealbreakers.includes(d)}
+                onPress={() => toggleDealbreaker(d)}
+              />
+            ))}
+            {ownDealbreakers.map((d) => (
+              <Chip key={d} label={d} selected onPress={() => toggleDealbreaker(d)} />
+            ))}
+          </Stack>
+          <Field
+            label="Add your own"
+            placeholder="Something that would end it for you"
+            value={custom}
+            onChangeText={setCustom}
+            onSubmitEditing={addCustom}
+            returnKeyType="done"
+            maxLength={40}
+          />
+          {custom.trim() ? (
+            <Button title="Add" variant="secondary" small full={false} onPress={addCustom} />
+          ) : null}
+        </Section>
+
+        <Section title="What do you want this to be?">
+          <Stack row wrap gap={spacing.sm}>
+            {INTENTS.map((i) => (
+              <Chip
+                key={i.value}
+                label={i.label}
+                selected={intent === i.value}
+                onPress={() => setIntent(i.value)}
+              />
+            ))}
+          </Stack>
+        </Section>
+
+        <Section title="One line for the matchmaker">
+          <Field
+            multiline
+            placeholder="Something your friends would say about what you're after."
+            value={openText}
+            onChangeText={(t) => setOpenText(t.slice(0, OPEN_MAX))}
+            maxLength={OPEN_MAX}
+            hint={`${openText.length}/${OPEN_MAX}`}
+            accessibilityLabel="One line for the matchmaker"
+          />
+        </Section>
+
+        <Stack gap={spacing.md}>
+          <Caption>
+            Everything else the matchmaker works out from your friends&apos; vouches, not a
+            questionnaire.
+          </Caption>
+          {error ? <Caption color={colors.danger}>{error}</Caption> : null}
+          <Button title={saveLabel} onPress={save} loading={saving} />
         </Stack>
-      </ScrollView>
-      <Footer>
-        {error ? <Caption color={colors.danger}>{error}</Caption> : null}
-        <Button title={saveLabel} onPress={save} loading={saving} />
-      </Footer>
-    </KeyboardAvoidingView>
+      </Stack>
+    </View>
   );
 }

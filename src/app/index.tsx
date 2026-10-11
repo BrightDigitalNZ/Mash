@@ -11,5 +11,7 @@ export default function Index() {
 
   if (booting) return <Loading />;
   if (!session) return <Redirect href="/(auth)/welcome" />;
+  // Signed in but the profile has not loaded yet: wait, do not bounce to welcome.
+  if (!profile) return <Loading />;
   return <Redirect href={homeFor(profile) as never} />;
 }

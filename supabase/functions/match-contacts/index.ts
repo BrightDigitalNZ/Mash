@@ -102,7 +102,7 @@ Deno.serve(
     const { data: matched } = others.size
       ? await admin
           .from('profiles')
-          .select('id, first_name, photo_url, city, bio, verified_photo, verified_social, date_of_birth, role')
+          .select('id, first_name, photo_url, city, bio, verified_photo, verified_social, date_of_birth, role, phone_hash')
           .in('id', Array.from(others))
       : { data: [] };
 
@@ -117,6 +117,8 @@ Deno.serve(
         verified_social: p.verified_social,
         role: p.role,
         age: ageFrom(p.date_of_birth as string | null),
+        // the hash the caller's contacts matched on, so the app can skip inviting them
+        hash: hashes.includes(p.phone_hash as string) ? (p.phone_hash as string) : null,
       })),
       pendingInvites,
     });
