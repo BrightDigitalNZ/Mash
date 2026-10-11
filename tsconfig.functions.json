@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "paths": {
+      "npm:@supabase/supabase-js@2": ["./node_modules/@supabase/supabase-js"],
+      "npm:@anthropic-ai/sdk@0.133.0": ["./node_modules/@anthropic-ai/sdk"],
+      "npm:@anthropic-ai/sdk@0.133.0/helpers/beta/zod": ["./node_modules/@anthropic-ai/sdk/helpers/beta/zod"],
+      "npm:zod@4": ["./node_modules/zod"]
+    }
+  },
+  "include": ["supabase/functions/**/*.ts"],
+  "exclude": ["supabase/functions/**/__tests__/**"]
+}

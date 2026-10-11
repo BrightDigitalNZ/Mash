@@ -1,0 +1,89 @@
+{
+  "expo": {
+    "name": "Mash",
+    "slug": "mash",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "mash",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1F1430"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "nz.co.brightdigital.mash",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "NSContactsUsageDescription": "Mash reads your contacts only to find friends who are already on Mash and to let you nominate friends. Phone numbers are hashed on your device before anything leaves it. Mash never stores your contact list.",
+        "NSPhotoLibraryUsageDescription": "Mash uses your photo library so you can choose a profile photo.",
+        "NSCameraUsageDescription": "Mash uses the camera so you can take a profile photo.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "nz.co.brightdigital.mash",
+      "adaptiveIcon": {
+        "backgroundColor": "#1F1430",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-apple-authentication",
+      "expo-secure-store",
+      "expo-localization",
+      "expo-web-browser",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Mash reads your contacts only to find friends who are already on Mash and to let you nominate friends. Phone numbers are hashed on your device before anything leaves it. Mash never stores your contact list."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Mash uses your photo library so you can choose a profile photo.",
+          "cameraPermission": "Mash uses the camera so you can take a profile photo."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/android-icon-monochrome.png",
+          "color": "#1F1430"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#1F1430"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      }
+    }
+  }
+}

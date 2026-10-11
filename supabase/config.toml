@@ -1,0 +1,53 @@
+# Supabase local config. Run `supabase init` to regenerate if your CLI version differs.
+project_id = "mash"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enabled = true
+site_url = "mash://"
+additional_redirect_urls = ["mash://auth/callback", "exp://127.0.0.1:8081"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+enable_anonymous_sign_ins = false
+
+[auth.external.apple]
+enabled = true
+client_id = "env(APPLE_CLIENT_ID)"
+secret = "env(APPLE_SECRET)"
+
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_SECRET)"
+skip_nonce_check = true
+
+[auth.external.facebook]
+enabled = true
+client_id = "env(FACEBOOK_CLIENT_ID)"
+secret = "env(FACEBOOK_SECRET)"
+
+[storage]
+enabled = true
+file_size_limit = "10MiB"
+
+[functions.match-contacts]
+verify_jwt = true
+[functions.build-lineup]
+verify_jwt = true
+[functions.decide]
+verify_jwt = true
+[functions.brief]
+verify_jwt = true
+[functions.nudge-vouchers]
+verify_jwt = false
