@@ -12,8 +12,8 @@ import { View } from 'react-native';
 import { Body, Button, Caption, Display, Heading, Screen, Stack } from '@/components/ui';
 import { Events, track } from '@/lib/analytics';
 import { isAppleAvailable, signIn, type Provider } from '@/lib/auth';
+import { copy } from '@/lib/copy';
 import { DEMO } from '@/lib/demo';
-import { supabase } from '@/lib/supabase';
 import { enterDemo, useSession } from '@/store/session';
 import { colors, palette, spacing } from '@/theme';
 
@@ -21,7 +21,15 @@ function describe(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   if (/cancel/i.test(msg)) return 'Sign in was cancelled.';
   if (/network|fetch/i.test(msg)) return 'No connection. Check your internet and try again.';
-  return 'Sign in did not work. Try again, or use a different account.';
+  return 'Sign in didn’t work. Try again, or use a different account.';
+}
+
+/** The auth listener in the session store catches up a beat after signIn resolves. */
+async function waitForSession(): Promise<void> {
+  for (let i = 0; i < 30; i += 1) {
+    if (useSession.getState().session) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 export default function Welcome() {
@@ -48,13 +56,7 @@ export default function Welcome() {
     try {
       await signIn(provider);
       track(Events.signedIn, { provider });
-      // The auth listener in the session store catches up asynchronously. Make sure the
-      // store has the session and profile before the index route decides where to send us.
-      const store = useSession.getState();
-      if (!store.session) {
-        const { data } = await supabase.auth.getSession();
-        store.setSession(data.session);
-      }
+      await waitForSession();
       await useSession.getState().refreshProfile();
       router.replace('/');
     } catch (err) {
@@ -64,12 +66,17 @@ export default function Welcome() {
     }
   }
 
+  function demoAs(persona: 'tin' | 'holly') {
+    enterDemo(persona);
+    router.replace('/');
+  }
+
   return (
     <Screen dark scroll={false} edges={['top', 'bottom', 'left', 'right']}>
       <View style={{ flex: 1, justifyContent: 'space-between' }}>
         <Stack gap={spacing.lg} style={{ paddingTop: spacing.xxxl }}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
-            <Display color={colors.textInverse}>Mash</Display>
+            <Display color={colors.textInverse}>{copy.app}</Display>
             <View
               accessible={false}
               style={{
@@ -82,31 +89,26 @@ export default function Welcome() {
               }}
             />
           </View>
-          <Heading color={colors.textInverse}>Dating, but someone&apos;s got your back.</Heading>
-          <Body color={palette.plum300}>No randoms, no catfish.</Body>
-          <Body color={palette.plum300}>Just singles your people can actually vouch for.</Body>
+          <Heading color={colors.textInverse}>{copy.tagline}</Heading>
+          <Body color={palette.plum300}>{copy.oneLine}</Body>
         </Stack>
 
         {DEMO ? (
           <Stack gap={spacing.md}>
             <Caption center color={palette.plum300}>
-              Demo with sample data. Nothing here is real.
+              A walk-through with sample people. Nothing here is real.
             </Caption>
             <Button
-              title="See it as Tin, who is single"
+              title="Tin, a Catch"
               variant="accent"
-              onPress={() => {
-                enterDemo('tin');
-                router.replace('/');
-              }}
+              onPress={() => demoAs('tin')}
+              accessibilityLabel="See Mash as Tin, a Catch"
             />
             <Button
-              title="See it as Holly, who vouches"
+              title="Holly, a Mashmaker"
               variant="inverse"
-              onPress={() => {
-                enterDemo('holly');
-                router.replace('/');
-              }}
+              onPress={() => demoAs('holly')}
+              accessibilityLabel="See Mash as Holly, a Mashmaker"
             />
             <Caption center color={palette.plum300} style={{ marginTop: spacing.sm }}>
               Sign out from Settings to switch.
@@ -143,7 +145,7 @@ export default function Welcome() {
               </Caption>
             ) : null}
             <Caption center color={palette.plum300} style={{ marginTop: spacing.sm }}>
-              18+ only. By continuing you agree to our Terms and Privacy Policy.
+              Sign in is for identity only. We never ask for your friend list.
             </Caption>
           </Stack>
         )}
