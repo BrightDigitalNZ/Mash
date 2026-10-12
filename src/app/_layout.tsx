@@ -1,3 +1,11 @@
+import {
+  BricolageGrotesque_400Regular,
+  BricolageGrotesque_500Medium,
+  BricolageGrotesque_600SemiBold,
+  BricolageGrotesque_700Bold,
+  BricolageGrotesque_800ExtraBold,
+  useFonts,
+} from '@expo-google-fonts/bricolage-grotesque';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Stack, router, SplashScreen } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -5,7 +13,11 @@ import { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { posthog } from '@/lib/analytics';
-import { getInitialNotificationData, onNotificationTap, registerForPush } from '@/lib/notifications';
+import {
+  getInitialNotificationData,
+  onNotificationTap,
+  registerForPush,
+} from '@/lib/notifications';
 import { bootSession, useSession } from '@/store/session';
 import { colors } from '@/theme';
 
@@ -18,12 +30,20 @@ const queryClient = new QueryClient({
 export default function RootLayout() {
   const booting = useSession((s) => s.booting);
   const userId = useSession((s) => s.session?.user.id);
+  const [fontsLoaded, fontError] = useFonts({
+    BricolageGrotesque_400Regular,
+    BricolageGrotesque_500Medium,
+    BricolageGrotesque_600SemiBold,
+    BricolageGrotesque_700Bold,
+    BricolageGrotesque_800ExtraBold,
+  });
+  const ready = !booting && (fontsLoaded || !!fontError);
 
   useEffect(() => bootSession(), []);
 
   useEffect(() => {
-    if (!booting) SplashScreen.hideAsync().catch(() => {});
-  }, [booting]);
+    if (ready) SplashScreen.hideAsync().catch(() => {});
+  }, [ready]);
 
   // Push: register once signed in, and route on tap.
   useEffect(() => {
@@ -42,6 +62,8 @@ export default function RootLayout() {
       posthog?.flush().catch(() => {});
     };
   }, []);
+
+  if (!ready) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>

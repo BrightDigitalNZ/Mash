@@ -1,48 +1,52 @@
-// Mash visual language. Warm, grown-up, no neon. Built for people who are done with the apps.
+// Mash visual language, matched to the pitch deck: black, white, one red. Bricolage Grotesque,
+// heavy and tight for headings. Pill buttons with a black outline. Grey cards. Red for the vouch.
 // Colours are tokens; components read from here and never hard-code hex.
+//
+// `palette` keeps its historical key names so every screen still compiles; the values are the
+// deck's. Prefer `colors` in new code.
 
 export const palette = {
-  plum900: '#1F1430',
-  plum700: '#3A2650',
-  plum500: '#5B3F7A',
-  plum300: '#A58CC1',
-  plum100: '#EFE8F6',
-  cream: '#FBF7F1',
-  cream200: '#F2EBE0',
-  sand: '#E6DCCB',
-  ink: '#1C1A1F',
-  ink700: '#4A454F',
-  ink500: '#7A7482',
-  ink300: '#B8B2BF',
-  terracotta: '#D9704F',
-  terracottaDeep: '#B9573A',
-  olive: '#6F8F5E',
-  oliveSoft: '#E4EBDD',
-  rose: '#E9C9C0',
-  gold: '#D8A85B',
+  plum900: '#000000',
+  plum700: '#000000',
+  plum500: '#333333',
+  plum300: '#8A8A8A',
+  plum100: '#F2F2F2',
+  cream: '#FFFFFF',
+  cream200: '#F4F4F4',
+  sand: '#D9D9D9',
+  ink: '#000000',
+  ink700: '#444444',
+  ink500: '#8A8A8A',
+  ink300: '#BDBDBD',
+  terracotta: '#E8322D',
+  terracottaDeep: '#C4271F',
+  olive: '#000000',
+  oliveSoft: '#F2F2F2',
+  rose: '#F4F4F4',
+  gold: '#E8322D',
   white: '#FFFFFF',
-  danger: '#B3261E',
+  danger: '#E8322D',
 } as const;
 
 export const colors = {
-  background: palette.cream,
-  surface: palette.white,
-  surfaceAlt: palette.cream200,
-  surfaceInverse: palette.plum900,
+  background: palette.white,
+  surface: palette.cream200,
+  surfaceAlt: palette.plum100,
+  surfaceInverse: palette.ink,
   border: palette.sand,
   text: palette.ink,
   textSecondary: palette.ink700,
   textMuted: palette.ink500,
-  textInverse: palette.cream,
-  primary: palette.plum700,
-  primaryPressed: palette.plum900,
+  textInverse: palette.white,
+  primary: palette.ink,
+  primaryPressed: palette.plum500,
   accent: palette.terracotta,
   accentPressed: palette.terracottaDeep,
-  success: palette.olive,
-  successSoft: palette.oliveSoft,
-  warm: palette.rose,
+  success: palette.terracotta,
+  successSoft: palette.plum100,
+  warm: palette.cream200,
   highlight: palette.plum100,
-  gold: palette.gold,
+  gold: palette.terracotta,
   danger: palette.danger,
 } as const;
 
@@ -57,33 +61,36 @@ export const spacing = {
 } as const;
 
 export const radius = {
-  sm: 8,
-  md: 14,
-  lg: 22,
+  sm: 10,
+  md: 16,
+  lg: 20,
   pill: 999,
 } as const;
 
-// System fonts on purpose: one less thing to load, and SF reads as native to the audience.
+// Loaded in the root layout from @expo-google-fonts/bricolage-grotesque.
+export const fonts = {
+  regular: 'BricolageGrotesque_400Regular',
+  medium: 'BricolageGrotesque_500Medium',
+  semibold: 'BricolageGrotesque_600SemiBold',
+  bold: 'BricolageGrotesque_700Bold',
+  extrabold: 'BricolageGrotesque_800ExtraBold',
+} as const;
+
 export const type = {
-  display: { fontSize: 34, lineHeight: 40, fontWeight: '700' as const, letterSpacing: -0.5 },
-  title: { fontSize: 26, lineHeight: 32, fontWeight: '700' as const, letterSpacing: -0.3 },
-  heading: { fontSize: 20, lineHeight: 26, fontWeight: '600' as const },
-  body: { fontSize: 17, lineHeight: 24, fontWeight: '400' as const },
-  bodyStrong: { fontSize: 17, lineHeight: 24, fontWeight: '600' as const },
-  quote: { fontSize: 19, lineHeight: 27, fontWeight: '400' as const, fontStyle: 'italic' as const },
-  caption: { fontSize: 14, lineHeight: 19, fontWeight: '400' as const },
-  label: { fontSize: 13, lineHeight: 16, fontWeight: '600' as const, letterSpacing: 0.4 },
+  display: { fontFamily: fonts.extrabold, fontSize: 56, lineHeight: 54, letterSpacing: -2 },
+  title: { fontFamily: fonts.extrabold, fontSize: 34, lineHeight: 34, letterSpacing: -1 },
+  heading: { fontFamily: fonts.bold, fontSize: 22, lineHeight: 26, letterSpacing: -0.4 },
+  body: { fontFamily: fonts.regular, fontSize: 17, lineHeight: 24 },
+  bodyStrong: { fontFamily: fonts.bold, fontSize: 17, lineHeight: 24 },
+  quote: { fontFamily: fonts.semibold, fontSize: 19, lineHeight: 25, letterSpacing: -0.2 },
+  caption: { fontFamily: fonts.regular, fontSize: 14, lineHeight: 19 },
+  label: { fontFamily: fonts.bold, fontSize: 12, lineHeight: 16, letterSpacing: 0.6 },
 } as const;
 
+// The deck has no shadows. Kept as a no-op so callers still compile.
 export const shadow = {
-  card: {
-    shadowColor: palette.plum900,
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-  },
+  card: {},
 } as const;
 
-export const theme = { colors, spacing, radius, type, shadow, palette };
+export const theme = { colors, spacing, radius, type, shadow, palette, fonts };
 export type Theme = typeof theme;

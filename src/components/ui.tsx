@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { colors, radius, shadow, spacing, type as typeScale } from '@/theme';
+import { colors, fonts, palette, radius, spacing, type as typeScale } from '@/theme';
 
 // --- layout -----------------------------------------------------------------
 
@@ -45,7 +45,10 @@ export function Screen({
   const bg = dark ? colors.surfaceInverse : colors.background;
   const inner = [padded && styles.padded, contentStyle];
   return (
-    <SafeAreaView style={[styles.flex, { backgroundColor: bg }, style]} edges={edges ?? ['top', 'left', 'right']}>
+    <SafeAreaView
+      style={[styles.flex, { backgroundColor: bg }, style]}
+      edges={edges ?? ['top', 'left', 'right']}
+    >
       {scroll ? (
         <ScrollView
           contentContainerStyle={[styles.scrollContent, inner]}
@@ -101,7 +104,13 @@ export function Divider() {
 }
 
 /** Sticks a footer (usually a button) above the home indicator. */
-export function Footer({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+export function Footer({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
   const insets = useSafeAreaInsets();
   return (
     <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }, style]}>
@@ -138,28 +147,51 @@ export function Text({
   );
 }
 
-export const Display = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => <Text variant="display" {...p} />;
-export const Title = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => <Text variant="title" {...p} />;
-export const Heading = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => <Text variant="heading" {...p} />;
-export const Body = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => <Text variant="body" {...p} />;
-export const Caption = (p: Omit<React.ComponentProps<typeof Text>, 'variant' | 'color'> & { color?: string }) => (
-  <Text variant="caption" color={p.color ?? colors.textMuted} {...p} />
+export const Display = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => (
+  <Text variant="display" {...p} />
 );
-export const Label = (p: Omit<React.ComponentProps<typeof Text>, 'variant' | 'color'> & { color?: string }) => (
-  <Text variant="label" color={p.color ?? colors.textMuted} {...p} style={[{ textTransform: 'uppercase' }, p.style]} />
+export const Title = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => (
+  <Text variant="title" {...p} />
+);
+export const Heading = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => (
+  <Text variant="heading" {...p} />
+);
+export const Body = (p: Omit<React.ComponentProps<typeof Text>, 'variant'>) => (
+  <Text variant="body" {...p} />
+);
+export const Caption = (
+  p: Omit<React.ComponentProps<typeof Text>, 'variant' | 'color'> & { color?: string },
+) => <Text variant="caption" color={p.color ?? colors.textMuted} {...p} />;
+export const Label = (
+  p: Omit<React.ComponentProps<typeof Text>, 'variant' | 'color'> & { color?: string },
+) => (
+  <Text
+    variant="label"
+    color={p.color ?? colors.textMuted}
+    {...p}
+    style={[{ textTransform: 'uppercase' }, p.style]}
+  />
 );
 
 /** A vouch, word for word, under the voucher's first name. */
-export function Quote({ text, by, style }: { text: string; by?: string; style?: StyleProp<ViewStyle> }) {
+export function Quote({
+  text,
+  by,
+  style,
+}: {
+  text: string;
+  by?: string;
+  style?: StyleProp<ViewStyle>;
+}) {
   return (
     <View style={[styles.quote, style]}>
-      <Text variant="quote" color={colors.text}>
+      <Text variant="quote" color={colors.textInverse}>
         {'“'}
         {text}
         {'”'}
       </Text>
       {by ? (
-        <Caption style={{ marginTop: spacing.sm }} color={colors.textSecondary}>
+        <Caption style={{ marginTop: spacing.xs }} color="rgba(255,255,255,0.75)">
           {by}
         </Caption>
       ) : null}
@@ -169,7 +201,7 @@ export function Quote({ text, by, style }: { text: string; by?: string; style?: 
 
 // --- controls ---------------------------------------------------------------
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'accent' | 'danger';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'accent' | 'danger' | 'inverse';
 
 export function Button({
   title,
@@ -194,10 +226,12 @@ export function Button({
 }) {
   const palette: Record<ButtonVariant, { bg: string; fg: string; border?: string }> = {
     primary: { bg: colors.primary, fg: colors.textInverse },
-    secondary: { bg: colors.surface, fg: colors.primary, border: colors.border },
+    secondary: { bg: 'transparent', fg: colors.primary, border: colors.primary },
     ghost: { bg: 'transparent', fg: colors.primary },
     accent: { bg: colors.accent, fg: colors.textInverse },
-    danger: { bg: colors.surface, fg: colors.danger, border: colors.border },
+    danger: { bg: 'transparent', fg: colors.danger, border: colors.danger },
+    // white outline for dark screens
+    inverse: { bg: 'transparent', fg: colors.textInverse, border: colors.textInverse },
   };
   const p = palette[variant];
   const isDisabled = disabled || loading;
@@ -211,7 +245,11 @@ export function Button({
       style={({ pressed }) => [
         styles.button,
         small && styles.buttonSmall,
-        { backgroundColor: p.bg, borderColor: p.border ?? 'transparent', borderWidth: p.border ? 1 : 0 },
+        {
+          backgroundColor: p.bg,
+          borderColor: p.border ?? 'transparent',
+          borderWidth: p.border ? 1.5 : 0,
+        },
         !full && { alignSelf: 'flex-start' },
         pressed && { opacity: 0.85 },
         isDisabled && { opacity: 0.5 },
@@ -221,7 +259,15 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={p.fg} />
       ) : (
-        <RNText style={[typeScale.bodyStrong, small && { fontSize: 15 }, { color: p.fg }]}>{title}</RNText>
+        <RNText
+          style={[
+            typeScale.bodyStrong,
+            small && { fontSize: 15 },
+            { color: p.fg, fontFamily: fonts.bold },
+          ]}
+        >
+          {title}
+        </RNText>
       )}
     </Pressable>
   );
@@ -250,7 +296,12 @@ export function Chip({
         style,
       ]}
     >
-      <RNText style={[typeScale.caption, { color: selected ? colors.textInverse : colors.text, fontWeight: '600' }]}>
+      <RNText
+        style={[
+          typeScale.caption,
+          { color: selected ? colors.textInverse : colors.text, fontFamily: fonts.bold },
+        ]}
+      >
         {label}
       </RNText>
     </Pressable>
@@ -263,13 +314,22 @@ export function Field({
   error,
   style,
   ...input
-}: { label?: string; hint?: string; error?: string | null; style?: StyleProp<ViewStyle> } & TextInputProps) {
+}: {
+  label?: string;
+  hint?: string;
+  error?: string | null;
+  style?: StyleProp<ViewStyle>;
+} & TextInputProps) {
   return (
     <View style={[{ gap: spacing.xs }, style]}>
       {label ? <Label>{label}</Label> : null}
       <TextInput
         placeholderTextColor={colors.textMuted}
-        style={[styles.input, input.multiline && styles.inputMultiline, error && { borderColor: colors.danger }]}
+        style={[
+          styles.input,
+          input.multiline && styles.inputMultiline,
+          error && { borderColor: colors.danger },
+        ]}
         {...input}
       />
       {error ? (
@@ -305,7 +365,12 @@ export function Card({
   const content = <View style={[styles.card, { backgroundColor: bg }, style]}>{children}</View>;
   if (!onPress) return content;
   return (
-    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => pressed && { opacity: 0.9 }} {...rest}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => pressed && { opacity: 0.9 }}
+      {...rest}
+    >
       {content}
     </Pressable>
   );
@@ -328,17 +393,32 @@ export function Avatar({
   return (
     <View
       style={[
-        { width: size, height: size, borderRadius: size / 2, overflow: 'hidden', backgroundColor: colors.highlight },
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          overflow: 'hidden',
+          backgroundColor: palette.ink300,
+        },
         ring && { borderWidth: 3, borderColor: colors.accent },
         style,
       ]}
       accessibilityLabel={name ? `${name}'s photo` : 'Photo'}
     >
       {uri ? (
-        <Image source={{ uri }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={150} />
+        <Image
+          source={{ uri }}
+          style={{ width: '100%', height: '100%' }}
+          contentFit="cover"
+          transition={150}
+        />
       ) : (
         <View style={styles.center}>
-          <RNText style={{ fontSize: size * 0.42, fontWeight: '700', color: colors.primary }}>{initial}</RNText>
+          <RNText
+            style={{ fontSize: size * 0.42, fontFamily: fonts.extrabold, color: colors.primary }}
+          >
+            {initial}
+          </RNText>
         </View>
       )}
     </View>
@@ -360,8 +440,16 @@ export function FaceRow({
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
       {shown.map((p, i) => (
-        <View key={p.id} style={{ marginLeft: i === 0 ? 0 : -size * 0.3, zIndex: shown.length - i }}>
-          <Avatar uri={p.photo_url} name={p.first_name} size={size} style={{ borderWidth: 2, borderColor: colors.background }} />
+        <View
+          key={p.id}
+          style={{ marginLeft: i === 0 ? 0 : -size * 0.3, zIndex: shown.length - i }}
+        >
+          <Avatar
+            uri={p.photo_url}
+            name={p.first_name}
+            size={size}
+            style={{ borderWidth: 2, borderColor: colors.background }}
+          />
         </View>
       ))}
       {extra > 0 ? (
@@ -406,10 +494,22 @@ export function ListRow({
 }
 
 /** Honest progress: "Your circle is 3 people. Matches unlock at 10." */
-export function Progress({ value, max, style }: { value: number; max: number; style?: StyleProp<ViewStyle> }) {
+export function Progress({
+  value,
+  max,
+  style,
+}: {
+  value: number;
+  max: number;
+  style?: StyleProp<ViewStyle>;
+}) {
   const pct = Math.max(0, Math.min(1, max === 0 ? 0 : value / max));
   return (
-    <View style={[styles.progressTrack, style]} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max, now: value }}>
+    <View
+      style={[styles.progressTrack, style]}
+      accessibilityRole="progressbar"
+      accessibilityValue={{ min: 0, max, now: value }}
+    >
       <View style={[styles.progressFill, { width: `${pct * 100}%` }]} />
     </View>
   );
@@ -432,7 +532,9 @@ export function ErrorView({ message, onRetry }: { message: string; onRetry?: () 
       <Body center color={colors.textSecondary}>
         {message}
       </Body>
-      {onRetry ? <Button title="Try again" variant="secondary" full={false} onPress={onRetry} /> : null}
+      {onRetry ? (
+        <Button title="Try again" variant="secondary" full={false} onPress={onRetry} />
+      ) : null}
     </View>
   );
 }
@@ -454,7 +556,9 @@ export function Empty({
           {body}
         </Body>
       ) : null}
-      {action ? <Button title={action.title} variant="secondary" full={false} onPress={action.onPress} /> : null}
+      {action ? (
+        <Button title={action.title} variant="secondary" full={false} onPress={action.onPress} />
+      ) : null}
     </View>
   );
 }
@@ -466,7 +570,11 @@ const styles = StyleSheet.create({
   padded: { paddingHorizontal: spacing.xl, paddingTop: spacing.lg, paddingBottom: spacing.xxl },
   scrollContent: { flexGrow: 1 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border, marginVertical: spacing.md },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+  },
   footer: {
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
@@ -476,9 +584,10 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   quote: {
-    paddingLeft: spacing.lg,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent,
+    backgroundColor: colors.accent,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
   },
   button: {
     minHeight: 52,
@@ -492,16 +601,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm + 2,
     borderRadius: radius.pill,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
   },
   chipSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   input: {
     ...typeScale.body,
     color: colors.text,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
     borderColor: colors.border,
     borderRadius: radius.md,
     paddingHorizontal: spacing.lg,
@@ -510,10 +619,9 @@ const styles = StyleSheet.create({
   },
   inputMultiline: { minHeight: 110, textAlignVertical: 'top', paddingTop: spacing.md },
   card: {
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     padding: spacing.lg,
     gap: spacing.sm,
-    ...shadow.card,
   },
   listRow: {
     flexDirection: 'row',
@@ -522,9 +630,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   progressTrack: {
-    height: 8,
+    height: 6,
     borderRadius: radius.pill,
-    backgroundColor: colors.border,
+    backgroundColor: palette.plum100,
     overflow: 'hidden',
   },
   progressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: radius.pill },

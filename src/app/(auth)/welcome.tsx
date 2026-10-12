@@ -68,7 +68,20 @@ export default function Welcome() {
     <Screen dark scroll={false} edges={['top', 'bottom', 'left', 'right']}>
       <View style={{ flex: 1, justifyContent: 'space-between' }}>
         <Stack gap={spacing.lg} style={{ paddingTop: spacing.xxxl }}>
-          <Display color={colors.textInverse}>Mash.</Display>
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+            <Display color={colors.textInverse}>Mash</Display>
+            <View
+              accessible={false}
+              style={{
+                width: 14,
+                height: 14,
+                borderRadius: 7,
+                backgroundColor: colors.accent,
+                marginLeft: 4,
+                marginBottom: 10,
+              }}
+            />
+          </View>
           <Heading color={colors.textInverse}>Dating, but someone&apos;s got your back.</Heading>
           <Body color={palette.plum300}>No randoms, no catfish.</Body>
           <Body color={palette.plum300}>Just singles your people can actually vouch for.</Body>
@@ -89,7 +102,7 @@ export default function Welcome() {
             />
             <Button
               title="See it as Holly, who vouches"
-              variant="secondary"
+              variant="inverse"
               onPress={() => {
                 enterDemo('holly');
                 router.replace('/');
@@ -112,14 +125,14 @@ export default function Welcome() {
             ) : null}
             <Button
               title="Continue with Google"
-              variant="secondary"
+              variant="inverse"
               loading={busy === 'google'}
               disabled={!!busy && busy !== 'google'}
               onPress={() => go('google')}
             />
             <Button
               title="Continue with Facebook"
-              variant="secondary"
+              variant="inverse"
               loading={busy === 'facebook'}
               disabled={!!busy && busy !== 'facebook'}
               onPress={() => go('facebook')}

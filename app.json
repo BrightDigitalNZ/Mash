@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#1F1430"
+      "backgroundColor": "#000000"
     },
     "ios": {
       "supportsTablet": false,
@@ -30,7 +30,7 @@
     "android": {
       "package": "nz.co.brightdigital.mash",
       "adaptiveIcon": {
-        "backgroundColor": "#1F1430",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -64,7 +64,7 @@
         "expo-notifications",
         {
           "icon": "./assets/android-icon-monochrome.png",
-          "color": "#1F1430"
+          "color": "#E8322D"
         }
       ],
       [
@@ -72,7 +72,7 @@
         {
           "image": "./assets/splash-icon.png",
           "resizeMode": "contain",
-          "backgroundColor": "#1F1430"
+          "backgroundColor": "#000000"
         }
       ]
     ],
