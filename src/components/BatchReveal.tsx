@@ -208,7 +208,7 @@ export default function BatchReveal({ batch, me }: { batch: BatchWithPeople; me:
         {decidedList}
 
         <Card style={{ padding: spacing.xl, gap: spacing.lg }}>
-          <Quote text={current.reason ?? `${mm} picked ${name} for you.`} by={`${mm} on ${name}`} />
+          <Quote text={current.reason ?? `${mm} picked ${name} for you.`} by={`Why ${mm} picked ${name}`} />
           {entryNotes.map((n) => (
             <Quote key={n.id} text={n.text} by={mm} />
           ))}
