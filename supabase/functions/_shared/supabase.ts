@@ -53,7 +53,9 @@ export function json(body: unknown, status = 200): Response {
 }
 
 /** Wrap a handler: CORS preflight, JSON errors, never leak stack traces. */
-export function handler(fn: (req: Request) => Promise<Response>): (req: Request) => Promise<Response> {
+export function handler(
+  fn: (req: Request) => Promise<Response>,
+): (req: Request) => Promise<Response> {
   return async (req: Request) => {
     if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
     try {
@@ -82,4 +84,10 @@ export function ageFrom(dateOfBirth: string | null): number | null {
   const m = now.getMonth() - dob.getMonth();
   if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
   return age;
+}
+
+/** A server-side switch from app_settings, with a default. OPEN decisions live here. */
+export async function setting(key: string, fallback: string): Promise<string> {
+  const { data } = await admin.from('app_settings').select('value').eq('key', key).maybeSingle();
+  return (data?.value as string | undefined) ?? fallback;
 }

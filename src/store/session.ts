@@ -124,7 +124,8 @@ export function homeFor(profile: Profile | null): string {
   if (!profile.onboarding_complete) {
     if (!profile.date_of_birth || !profile.city) return '/(onboarding)/about';
     if (!profile.role) return '/(onboarding)/role';
-    return profile.role === 'single' ? '/(onboarding)/criteria' : '/(onboarding)/contacts';
+    if (profile.role === 'catch' && !profile.open_to_matching) return '/(onboarding)/criteria';
+    return '/(onboarding)/contacts';
   }
-  return profile.role === 'voucher' ? '/(voucher)/friends' : '/(single)/circle';
+  return profile.role === 'mashmaker' ? '/(mashmaker)/catches' : '/(catch)/mashmakers';
 }

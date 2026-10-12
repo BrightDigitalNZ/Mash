@@ -1,199 +1,293 @@
-// POST { entryId: string, decision: 'meet' | 'maybe' | 'not_this_time' }
+// POST one of:
+//   { entryId, consent: 'yes' | 'no' }           a nominee answering "okay to be shown?"
+//   { entryId, decision: 'meet'|'maybe'|'pass' } the Catch deciding on a revealed entry
+//   { mashId,  decision: 'meet'|'pass' }         the other Catch answering a mash
 //
-// Two callers:
-//   * The single, deciding on a lineup entry. "meet" creates a pending introduction and
-//     shows the candidate the reverse: the single, vouched by the same friend.
-//   * The candidate, answering that reverse introduction. If both said meet, the intro
-//     becomes mutual, the chat opens with the vouch as its first message, and the voucher
-//     hears the outcome in plain words.
-//
-// Declining sends nothing to the declined person. Ever.
+// Consent at every step; mutual acceptance before any contact; decline without explanation,
+// always. A pass tells the other person nothing. The Mashmaker learns "accepted / declined"
+// only, and only what the Catch's visibility setting allows.
 
-import { admin, handler, json, readBody, requireUser, HttpError } from '../_shared/supabase.ts';
+import {
+  admin,
+  handler,
+  json,
+  readBody,
+  requireUser,
+  setting,
+  HttpError,
+} from '../_shared/supabase.ts';
 import { notify } from '../_shared/push.ts';
 
 interface Body {
   entryId?: string;
-  introId?: string;
-  decision: 'meet' | 'maybe' | 'not_this_time';
+  mashId?: string;
+  consent?: 'yes' | 'no';
+  decision?: 'meet' | 'maybe' | 'pass';
 }
 
 Deno.serve(
   handler(async (req) => {
     const userId = await requireUser(req);
     const body = await readBody<Body>(req);
-    if (!['meet', 'maybe', 'not_this_time'].includes(body.decision)) throw new HttpError(400, 'Bad decision');
-
-    if (body.entryId) return decideEntry(userId, body.entryId, body.decision);
-    if (body.introId) return decideIntro(userId, body.introId, body.decision);
-    throw new HttpError(400, 'entryId or introId required');
+    if (body.entryId && body.consent) return answerConsent(userId, body.entryId, body.consent);
+    if (body.entryId && body.decision) return decideEntry(userId, body.entryId, body.decision);
+    if (body.mashId && body.decision) return decideMash(userId, body.mashId, body.decision);
+    throw new HttpError(400, 'entryId with consent or decision, or mashId with decision');
   }),
 );
 
-async function decideEntry(userId: string, entryId: string, decision: Body['decision']) {
+async function loadEntry(entryId: string) {
   const { data: entry } = await admin
-    .from('lineup_entries')
-    .select('id, candidate_id, kept, decision, lineups:lineup_id(id, single_id, voucher_id)')
+    .from('batch_entries')
+    .select(
+      'id, candidate_id, kept, consent, decision, batches:batch_id(id, catch_id, mashmaker_id, status)',
+    )
     .eq('id', entryId)
     .single();
   if (!entry) throw new HttpError(404, 'Not found');
-  const lineup = entry.lineups as unknown as { id: string; single_id: string; voucher_id: string };
-  if (lineup.single_id !== userId) throw new HttpError(403, 'Only the single decides');
-  if (!entry.kept) throw new HttpError(400, 'That person is not on the lineup');
+  const batch = entry.batches as unknown as {
+    id: string;
+    catch_id: string;
+    mashmaker_id: string;
+    status: string;
+  };
+  return { entry, batch };
+}
+
+/** The nominee's yes in principle. Only then does the Catch see them. */
+async function answerConsent(userId: string, entryId: string, consent: 'yes' | 'no') {
+  const { entry, batch } = await loadEntry(entryId);
+  if (entry.candidate_id !== userId) throw new HttpError(403, 'Only the person asked can answer');
+  if (entry.consent !== 'pending') return json({ ok: true, consent: entry.consent });
 
   await admin
-    .from('lineup_entries')
+    .from('batch_entries')
+    .update({ consent, consent_at: new Date().toISOString() })
+    .eq('id', entryId);
+
+  if (consent === 'yes' && batch.status === 'consenting') {
+    // First yes makes the batch visible to the Catch.
+    await admin
+      .from('batches')
+      .update({ status: 'ready', ready_at: new Date().toISOString() })
+      .eq('id', batch.id);
+    const { data: mm } = await admin
+      .from('profiles')
+      .select('first_name')
+      .eq('id', batch.mashmaker_id)
+      .single();
+    await notify(
+      batch.catch_id,
+      'batch_ready',
+      `${mm?.first_name ?? 'Your Mashmaker'} has a batch for you.`,
+      { route: `/batch/${batch.id}` },
+    );
+  }
+
+  // If everyone has answered and nobody said yes, the batch is done. The Mashmaker sees counts only.
+  const { data: remaining } = await admin
+    .from('batch_entries')
+    .select('id')
+    .eq('batch_id', batch.id)
+    .eq('kept', true)
+    .eq('consent', 'pending');
+  const { data: yeses } = await admin
+    .from('batch_entries')
+    .select('id')
+    .eq('batch_id', batch.id)
+    .eq('kept', true)
+    .eq('consent', 'yes');
+  if ((!remaining || remaining.length === 0) && (!yeses || yeses.length === 0)) {
+    await admin
+      .from('batches')
+      .update({ status: 'done', done_at: new Date().toISOString() })
+      .eq('id', batch.id);
+  }
+  return json({ ok: true, consent });
+}
+
+/** The Catch decides on a revealed entry. "meet" creates a pending mash and asks the other side. */
+async function decideEntry(userId: string, entryId: string, decision: 'meet' | 'maybe' | 'pass') {
+  const { entry, batch } = await loadEntry(entryId);
+  if (batch.catch_id !== userId) throw new HttpError(403, 'Only the Catch decides');
+  if (!entry.kept || entry.consent !== 'yes')
+    throw new HttpError(400, 'That person is not in the batch');
+
+  await admin
+    .from('batch_entries')
     .update({ decision, decided_at: new Date().toISOString() })
     .eq('id', entryId);
 
+  let mashId: string | undefined;
+  let status: string | undefined;
   if (decision === 'meet') {
-    // Create (or refresh) the introduction. Co-vouching: if another lineup already proposed
-    // this pair, add the voucher rather than making a second intro.
     const { data: existing } = await admin
-      .from('introductions')
-      .select('id, voucher_ids, candidate_decision, status')
-      .eq('single_id', userId)
+      .from('mashes')
+      .select('id, mashmaker_ids, candidate_decision, status')
+      .eq('catch_id', userId)
       .eq('candidate_id', entry.candidate_id)
       .maybeSingle();
-
-    const { data: me } = await admin.from('profiles').select('first_name').eq('id', userId).single();
-    const { data: voucher } = await admin.from('profiles').select('first_name').eq('id', lineup.voucher_id).single();
+    const { data: me } = await admin
+      .from('profiles')
+      .select('first_name')
+      .eq('id', userId)
+      .single();
+    const { data: mm } = await admin
+      .from('profiles')
+      .select('first_name')
+      .eq('id', batch.mashmaker_id)
+      .single();
 
     if (existing) {
-      const vouchers = Array.from(new Set([...(existing.voucher_ids as string[]), lineup.voucher_id]));
+      const mashmakers = Array.from(
+        new Set([...(existing.mashmaker_ids as string[]), batch.mashmaker_id]),
+      );
       await admin
-        .from('introductions')
-        .update({ voucher_ids: vouchers, single_decision: 'meet' })
+        .from('mashes')
+        .update({ mashmaker_ids: mashmakers, catch_decision: 'meet' })
         .eq('id', existing.id);
-      if (vouchers.length > (existing.voucher_ids as string[]).length) {
-        // Two friends picked the same person: the strongest signal in the product.
-        for (const v of vouchers) {
-          await notify(v, 'comment', `Two of ${me?.first_name}'s friends picked the same person. That is the best sign there is.`, {
-            route: `/lineup/${lineup.id}`,
-          });
-        }
-      }
-      if (existing.candidate_decision === 'meet') {
-        await openChat(existing.id);
-      }
-      return json({ introId: existing.id, status: existing.candidate_decision === 'meet' ? 'mutual' : 'pending' });
+      if (existing.candidate_decision === 'meet') await openConversation(existing.id);
+      mashId = existing.id;
+      status = existing.candidate_decision === 'meet' ? 'mutual' : 'pending';
+    } else {
+      // OPEN: how long a pending mash waits. A server-side switch, default 7 days.
+      const expiryDays = Number(await setting('intro_expiry_days', '7'));
+      const { data: mash, error } = await admin
+        .from('mashes')
+        .insert({
+          catch_id: userId,
+          candidate_id: entry.candidate_id,
+          mashmaker_ids: [batch.mashmaker_id],
+          batch_entry_id: entryId,
+          catch_decision: 'meet',
+          status: 'pending',
+          expires_at: new Date(Date.now() + expiryDays * 86400000).toISOString(),
+        })
+        .select('id')
+        .single();
+      if (error || !mash) throw error ?? new Error('Could not create mash');
+      mashId = mash.id;
+      status = 'pending';
+      await notify(
+        entry.candidate_id,
+        'batch_ready',
+        `${mm?.first_name ?? 'A friend'} has picked you for ${me?.first_name ?? 'someone'}. Here’s why.`,
+        { route: `/mash/${mash.id}` },
+      );
     }
-
-    const { data: intro, error } = await admin
-      .from('introductions')
-      .insert({
-        single_id: userId,
-        candidate_id: entry.candidate_id,
-        voucher_ids: [lineup.voucher_id],
-        lineup_entry_id: entryId,
-        single_decision: 'meet',
-        status: 'pending',
-      })
-      .select('id')
-      .single();
-    if (error || !intro) throw error ?? new Error('Could not create introduction');
-
-    await notify(entry.candidate_id, 'lineup_ready', `${voucher?.first_name ?? 'A friend'} wants to introduce you to ${me?.first_name ?? 'someone'}.`, {
-      route: `/intro/${intro.id}`,
-    });
-    return json({ introId: intro.id, status: 'pending' });
   }
 
-  // The lineup is done when every kept entry has a non-maybe decision.
-  const { data: remaining } = await admin
-    .from('lineup_entries')
+  const { data: undecided } = await admin
+    .from('batch_entries')
     .select('id')
-    .eq('lineup_id', lineup.id)
+    .eq('batch_id', batch.id)
     .eq('kept', true)
-    .in('decision', ['undecided']);
-  if (!remaining || remaining.length === 0) {
-    await admin.from('lineups').update({ status: 'done', done_at: new Date().toISOString() }).eq('id', lineup.id);
-  }
-  return json({ ok: true });
-}
-
-async function decideIntro(userId: string, introId: string, decision: Body['decision']) {
-  const { data: intro } = await admin
-    .from('introductions')
-    .select('id, single_id, candidate_id, voucher_ids, single_decision, candidate_decision, status')
-    .eq('id', introId)
-    .single();
-  if (!intro) throw new HttpError(404, 'Not found');
-  if (intro.candidate_id !== userId) throw new HttpError(403, 'Only the person introduced can answer');
-  if (intro.status !== 'pending') return json({ introId, status: intro.status });
-
-  if (decision === 'not_this_time') {
+    .eq('consent', 'yes')
+    .eq('decision', 'undecided');
+  const { data: pendingConsent } = await admin
+    .from('batch_entries')
+    .select('id')
+    .eq('batch_id', batch.id)
+    .eq('kept', true)
+    .eq('consent', 'pending');
+  if ((!undecided || undecided.length === 0) && (!pendingConsent || pendingConsent.length === 0)) {
     await admin
-      .from('introductions')
-      .update({ candidate_decision: decision, status: 'declined', closed_at: new Date().toISOString() })
-      .eq('id', introId);
-    // A kind automatic note to the voucher. The single never knows.
-    const { data: cand } = await admin.from('profiles').select('first_name').eq('id', userId).single();
-    for (const v of intro.voucher_ids as string[]) {
-      await notify(v, 'outcome', `${cand?.first_name ?? 'They'} said not this time. Good instinct to try, though.`, {});
-    }
-    return json({ introId, status: 'declined' });
+      .from('batches')
+      .update({ status: 'done', done_at: new Date().toISOString() })
+      .eq('id', batch.id);
   }
-
-  await admin.from('introductions').update({ candidate_decision: decision }).eq('id', introId);
-  if (decision === 'meet' && intro.single_decision === 'meet') {
-    await openChat(introId);
-    return json({ introId, status: 'mutual' });
-  }
-  return json({ introId, status: 'pending' });
+  return json({ ok: true, mashId, status });
 }
 
-/** Both said meet. Open the chat with the vouch as the first message and tell everyone. */
-async function openChat(introId: string) {
-  const { data: intro } = await admin
-    .from('introductions')
-    .select('id, single_id, candidate_id, voucher_ids, status')
-    .eq('id', introId)
+/** The other Catch answers. A pass tells nobody why. */
+async function decideMash(userId: string, mashId: string, decision: 'meet' | 'maybe' | 'pass') {
+  const { data: mash } = await admin
+    .from('mashes')
+    .select('id, catch_id, candidate_id, mashmaker_ids, catch_decision, candidate_decision, status')
+    .eq('id', mashId)
     .single();
-  if (!intro || intro.status === 'mutual') return;
+  if (!mash) throw new HttpError(404, 'Not found');
+  if (mash.candidate_id !== userId) throw new HttpError(403, 'Only the person mashed can answer');
+  if (mash.status !== 'pending') return json({ mashId, status: mash.status });
 
+  if (decision === 'pass') {
+    await admin
+      .from('mashes')
+      .update({
+        candidate_decision: 'pass',
+        status: 'declined',
+        closed_at: new Date().toISOString(),
+      })
+      .eq('id', mashId);
+    // The Mashmaker learns "declined", nothing more. Not dressed up.
+    for (const m of mash.mashmaker_ids as string[]) {
+      await notify(m, 'outcome', 'This one didn’t go ahead.', { route: '/(mashmaker)/record' });
+    }
+    return json({ mashId, status: 'declined' });
+  }
+
+  await admin.from('mashes').update({ candidate_decision: decision }).eq('id', mashId);
+  if (decision === 'meet' && mash.catch_decision === 'meet') {
+    await openConversation(mashId);
+    return json({ mashId, status: 'mutual' });
+  }
+  return json({ mashId, status: 'pending' });
+}
+
+/** Both said yes. The conversation opens with the Mashmaker's line. Both know who introduced them. */
+async function openConversation(mashId: string) {
+  const { data: mash } = await admin
+    .from('mashes')
+    .select('id, catch_id, candidate_id, mashmaker_ids, status')
+    .eq('id', mashId)
+    .single();
+  if (!mash || mash.status === 'mutual') return;
   await admin
-    .from('introductions')
+    .from('mashes')
     .update({ status: 'mutual', opened_at: new Date().toISOString() })
-    .eq('id', introId);
+    .eq('id', mashId);
 
-  const voucherIds = intro.voucher_ids as string[];
+  const mashmakerIds = mash.mashmaker_ids as string[];
   const { data: people } = await admin
     .from('profiles')
     .select('id, first_name')
-    .in('id', [intro.single_id, intro.candidate_id, ...voucherIds]);
-  const name = (id: string) => people?.find((p: { id: string }) => p.id === id)?.first_name ?? 'A friend';
+    .in('id', [mash.catch_id, mash.candidate_id, ...mashmakerIds]);
+  const name = (id: string) =>
+    people?.find((p: { id: string }) => p.id === id)?.first_name ?? 'A friend';
 
-  // The vouch about each person, from the first voucher, opens the chat.
   const { data: vouches } = await admin
     .from('vouches')
-    .select('voucher_id, single_id, text')
-    .in('voucher_id', voucherIds)
-    .in('single_id', [intro.single_id, intro.candidate_id]);
-  const lines: { intro_id: string; sender_id: null; body: string; is_vouch: boolean }[] = [];
-  for (const v of vouches ?? []) {
-    lines.push({
-      intro_id: introId,
+    .select('mashmaker_id, catch_id, text')
+    .in('mashmaker_id', mashmakerIds)
+    .in('catch_id', [mash.catch_id, mash.candidate_id]);
+  const lines = (vouches ?? []).map(
+    (v: { mashmaker_id: string; catch_id: string; text: string }) => ({
+      mash_id: mashId,
       sender_id: null,
-      body: `${name(v.voucher_id)} on ${name(v.single_id)}: ${v.text}`,
+      body: `${name(v.mashmaker_id)} on ${name(v.catch_id)}: ${v.text}`,
+      is_vouch: true,
+    }),
+  );
+  if (lines.length === 0)
+    lines.push({
+      mash_id: mashId,
+      sender_id: null,
+      body: `${name(mashmakerIds[0] ?? '')} mashed you.`,
       is_vouch: true,
     });
-  }
-  if (lines.length === 0) {
-    lines.push({
-      intro_id: introId,
-      sender_id: null,
-      body: `${name(voucherIds[0] ?? '')} introduced you both.`,
-      is_vouch: true,
-    });
-  }
   await admin.from('messages').insert(lines);
 
-  const s = name(intro.single_id);
-  const c = name(intro.candidate_id);
-  await notify(intro.single_id, 'intro_mutual', `${c} said yes. Say hello.`, { route: `/intro/${introId}` });
-  await notify(intro.candidate_id, 'intro_mutual', `${s} said yes. Say hello.`, { route: `/intro/${introId}` });
-  for (const v of voucherIds) {
-    await notify(v, 'outcome', `${s} and ${c} are talking. You did that.`, { route: '/(voucher)/record' });
+  const c = name(mash.catch_id);
+  const d = name(mash.candidate_id);
+  await notify(mash.catch_id, 'mash_mutual', `${d} said yes. Say hello.`, {
+    route: `/mash/${mashId}`,
+  });
+  await notify(mash.candidate_id, 'mash_mutual', `${c} said yes. Say hello.`, {
+    route: `/mash/${mashId}`,
+  });
+  for (const m of mashmakerIds) {
+    await notify(m, 'outcome', `${c} and ${d} both said yes. You did that.`, {
+      route: '/(mashmaker)/record',
+    });
   }
 }

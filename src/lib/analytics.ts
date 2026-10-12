@@ -1,5 +1,5 @@
-// The five metrics that matter, named once so every screen uses the same strings.
-// voucher weekly actives, nominations per voucher, circle size at first match, 30-day retention, K-factor.
+// Events named once so every screen uses the same strings.
+// Company north metric: "met and went again". Not matches, messages or time in app.
 
 import PostHog from 'posthog-react-native';
 
@@ -14,25 +14,31 @@ export const Events = {
   signedIn: 'signed_in',
   rolePicked: 'role_picked',
   criteriaSaved: 'criteria_saved',
+  matchingOptedIn: 'matching_opted_in',
   contactsGranted: 'contacts_granted',
   contactsDeclined: 'contacts_declined',
   contactsMatched: 'contacts_matched',
   inviteSent: 'invite_sent',
   inviteAccepted: 'invite_accepted',
+  mashmakerAsked: 'mashmaker_asked',
+  mashmakerAccepted: 'mashmaker_accepted',
   vouchWritten: 'vouch_written',
-  lineupRequested: 'lineup_requested',
-  lineupReady: 'lineup_ready',
-  lineupOpened: 'lineup_opened',
+  batchRequested: 'batch_requested',
+  consentAnswered: 'consent_answered',
+  batchOpened: 'batch_opened',
   entryDecided: 'entry_decided',
-  introMutual: 'intro_mutual',
-  firstMatch: 'first_match',
+  mashMutual: 'mash_mutual',
+  firstMash: 'first_mash',
   outcomeReported: 'outcome_reported',
+  metAndWentAgain: 'met_and_went_again',
+  checksRequested: 'checks_requested',
   commentLeft: 'comment_left',
   plusViewed: 'plus_viewed',
   plusStarted: 'plus_started',
   paused: 'paused',
   reported: 'reported',
   blocked: 'blocked',
+  excluded: 'excluded',
   accountDeleted: 'account_deleted',
 } as const;
 

@@ -16,10 +16,18 @@ const base: Profile = {
   plus_until: null,
   paused: false,
   onboarding_complete: false,
-  verified_photo: false,
-  verified_social: false,
-  brief_consent: false,
-  reverse_image_consent: false,
+  gender: null,
+  seeking: [],
+  open_to_matching: false,
+  trial_started_at: null,
+  trial_ends_at: null,
+  verified_identity: false,
+  photos_current: false,
+  verified_at: null,
+  dd_consent: false,
+  mashmaker_visibility: 'minimal',
+  catch_rules_accepted_at: null,
+  mashmaker_rules_accepted_at: null,
   created_at: '',
   updated_at: '',
 };
@@ -34,18 +42,23 @@ describe('homeFor', () => {
   });
 
   it('then the role', () => {
-    expect(homeFor({ ...base, date_of_birth: '1988-01-01', city: 'Auckland' })).toBe('/(onboarding)/role');
+    expect(homeFor({ ...base, date_of_birth: '1988-01-01', city: 'Auckland' })).toBe(
+      '/(onboarding)/role',
+    );
   });
 
-  it('singles go to criteria, vouchers to contacts', () => {
+  it('catches go to criteria until they switch matching on, mashmakers to contacts', () => {
     const basics = { ...base, date_of_birth: '1988-01-01', city: 'Auckland' };
-    expect(homeFor({ ...basics, role: 'single' })).toBe('/(onboarding)/criteria');
-    expect(homeFor({ ...basics, role: 'voucher' })).toBe('/(onboarding)/contacts');
+    expect(homeFor({ ...basics, role: 'catch' })).toBe('/(onboarding)/criteria');
+    expect(homeFor({ ...basics, role: 'catch', open_to_matching: true })).toBe(
+      '/(onboarding)/contacts',
+    );
+    expect(homeFor({ ...basics, role: 'mashmaker' })).toBe('/(onboarding)/contacts');
   });
 
   it('finished users land on their home tab', () => {
     const done = { ...base, onboarding_complete: true };
-    expect(homeFor({ ...done, role: 'single' })).toBe('/(single)/circle');
-    expect(homeFor({ ...done, role: 'voucher' })).toBe('/(voucher)/friends');
+    expect(homeFor({ ...done, role: 'catch' })).toBe('/(catch)/mashmakers');
+    expect(homeFor({ ...done, role: 'mashmaker' })).toBe('/(mashmaker)/catches');
   });
 });

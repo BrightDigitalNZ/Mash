@@ -78,12 +78,13 @@ export default function RootLayout() {
           <Stack.Screen name="index" />
           <Stack.Screen name="(auth)" />
           <Stack.Screen name="(onboarding)" />
-          <Stack.Screen name="(single)" />
-          <Stack.Screen name="(voucher)" />
-          <Stack.Screen name="lineup/[id]" options={{ presentation: 'card' }} />
-          <Stack.Screen name="intro/[id]" />
-          <Stack.Screen name="vouch/[singleId]" options={{ presentation: 'modal' }} />
-          <Stack.Screen name="nominate/[singleId]" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="(catch)" />
+          <Stack.Screen name="(mashmaker)" />
+          <Stack.Screen name="batch/[id]" options={{ presentation: 'card' }} />
+          <Stack.Screen name="mash/[id]" />
+          <Stack.Screen name="consent/[batchId]" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="vouch/[catchId]" options={{ presentation: 'modal' }} />
+          <Stack.Screen name="nominate/[catchId]" options={{ presentation: 'modal' }} />
           <Stack.Screen name="invite" options={{ presentation: 'modal' }} />
           <Stack.Screen name="report/[userId]" options={{ presentation: 'modal' }} />
           <Stack.Screen name="settings" />

@@ -1,5 +1,5 @@
 // Read hooks. React Query for fetching and caching, Supabase Realtime for the live
-// moments: a voucher watching a lineup, a chat, a notification arriving.
+// moments: a Mashmaker watching a batch, a chat, a notification arriving.
 
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect } from 'react';
@@ -8,18 +8,21 @@ import { DEMO, demo, subscribeDemo } from '@/lib/demo';
 import { supabase } from '@/lib/supabase';
 import { useSession } from '@/store/session';
 import type {
+  AppSetting,
+  Batch,
+  BatchComment,
+  BatchEntry,
   Brief,
-  CircleRow,
   Criteria,
-  Introduction,
+  ExcludedHash,
   LinkedProfile,
-  Lineup,
-  LineupComment,
-  LineupEntry,
+  Mash,
   Message,
-  MySingleRow,
+  MyCatchRow,
+  MyMashmakerRow,
   NominatableRow,
   Notification,
+  Outcome,
   Profile,
   PublicProfile,
   RecordRow,
@@ -27,22 +30,27 @@ import type {
 } from '@/types/database';
 
 export const keys = {
-  circle: ['circle'] as const,
+  settings: ['settings'] as const,
+  mashmakers: ['mashmakers'] as const,
+  catches: ['catches'] as const,
   criteria: (id: string) => ['criteria', id] as const,
-  lineups: ['lineups'] as const,
-  lineup: (id: string) => ['lineup', id] as const,
-  intros: ['intros'] as const,
-  intro: (id: string) => ['intro', id] as const,
+  batches: ['batches'] as const,
+  batch: (id: string) => ['batch', id] as const,
+  consents: ['consents'] as const,
+  mashes: ['mashes'] as const,
+  mash: (id: string) => ['mash', id] as const,
   messages: (id: string) => ['messages', id] as const,
-  brief: (introId: string, subjectId: string) => ['brief', introId, subjectId] as const,
-  mySingles: ['mySingles'] as const,
+  outcomes: (id: string) => ['outcomes', id] as const,
+  brief: (mashId: string) => ['brief', mashId] as const,
   record: ['record'] as const,
   nominatable: (id: string) => ['nominatable', id] as const,
   prompt: ['prompt'] as const,
   linked: (id: string) => ['linked', id] as const,
+  exclusions: ['exclusions'] as const,
   notifications: ['notifications'] as const,
   profile: (id: string) => ['profile', id] as const,
   vouchesFor: (id: string) => ['vouchesFor', id] as const,
+  connections: ['connections'] as const,
 };
 
 function ageFrom(dob: string | null): number | null {
@@ -55,6 +63,7 @@ function ageFrom(dob: string | null): number | null {
   return age;
 }
 
+/** What one person may see of another. Never gender, seeking, consents or the phone hash. */
 export function toPublic(p: Profile): PublicProfile {
   return {
     id: p.id,
@@ -62,13 +71,24 @@ export function toPublic(p: Profile): PublicProfile {
     photo_url: p.photo_url,
     city: p.city,
     bio: p.bio,
-    verified_photo: p.verified_photo,
-    verified_social: p.verified_social,
+    verified_identity: p.verified_identity,
+    photos_current: p.photos_current,
     age: ageFrom(p.date_of_birth),
   };
 }
 
-/** Subscribe to a table filter and invalidate query keys when rows change. */
+/** Paid, or inside the trial. */
+export function isEntitled(p: Profile | null): boolean {
+  if (!p) return false;
+  if (p.is_plus) return true;
+  return !!p.trial_ends_at && new Date(p.trial_ends_at).getTime() > Date.now();
+}
+
+export function trialDaysLeft(p: Profile | null): number | null {
+  if (!p?.trial_ends_at) return null;
+  return Math.max(0, Math.ceil((new Date(p.trial_ends_at).getTime() - Date.now()) / 86400000));
+}
+
 function useRealtime(
   channel: string,
   table: string,
@@ -99,35 +119,53 @@ function useRealtime(
   }, [channel, table, filter]);
 }
 
-// --- single -----------------------------------------------------------------
+// --- settings ---------------------------------------------------------------
 
-export function useCircle(): UseQueryResult<CircleRow[]> {
-  const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`circle-${userId}`, 'vouches', userId ? `single_id=eq.${userId}` : undefined, [
-    keys.circle,
-  ]);
+export function useAppSettings(): UseQueryResult<Record<string, string>> {
   return useQuery({
-    queryKey: keys.circle,
-    enabled: !!userId,
+    queryKey: keys.settings,
+    staleTime: 10 * 60 * 1000,
     queryFn: async () => {
-      if (DEMO) return demo.circle();
-      const { data, error } = await supabase.rpc('my_circle');
+      if (DEMO) return demo.settings();
+      const { data, error } = await supabase.from('app_settings').select('key, value');
       if (error) throw error;
-      return (data ?? []) as CircleRow[];
+      return Object.fromEntries(((data ?? []) as AppSetting[]).map((s) => [s.key, s.value]));
     },
   });
 }
 
-export function useCriteria(singleId: string | undefined) {
+// --- Catch ------------------------------------------------------------------
+
+export function useMyMashmakers(): UseQueryResult<MyMashmakerRow[]> {
+  const userId = useSession((s) => s.session?.user.id);
+  useRealtime(
+    `links-c-${userId}`,
+    'mashmaker_links',
+    userId ? `catch_id=eq.${userId}` : undefined,
+    [keys.mashmakers],
+  );
   return useQuery({
-    queryKey: keys.criteria(singleId ?? ''),
-    enabled: !!singleId,
+    queryKey: keys.mashmakers,
+    enabled: !!userId,
     queryFn: async () => {
-      if (DEMO) return demo.criteria(singleId!);
+      if (DEMO) return demo.myMashmakers();
+      const { data, error } = await supabase.rpc('my_mashmakers');
+      if (error) throw error;
+      return (data ?? []) as MyMashmakerRow[];
+    },
+  });
+}
+
+export function useCriteria(catchId: string | undefined) {
+  return useQuery({
+    queryKey: keys.criteria(catchId ?? ''),
+    enabled: !!catchId,
+    queryFn: async () => {
+      if (DEMO) return demo.criteria(catchId!);
       const { data, error } = await supabase
         .from('criteria')
         .select('*')
-        .eq('single_id', singleId!)
+        .eq('catch_id', catchId!)
         .maybeSingle();
       if (error) throw error;
       return (data as Criteria | null) ?? null;
@@ -135,73 +173,76 @@ export function useCriteria(singleId: string | undefined) {
   });
 }
 
-export interface LineupWithPeople extends Lineup {
-  voucher: PublicProfile;
-  single: PublicProfile;
-  entries: (LineupEntry & { candidate: PublicProfile })[];
-  comments: LineupComment[];
+export interface BatchWithPeople extends Batch {
+  mashmaker: PublicProfile;
+  catch: PublicProfile;
+  entries: (BatchEntry & { candidate: PublicProfile })[];
+  comments: BatchComment[];
 }
 
-export function useLineups(): UseQueryResult<
-  (Lineup & { voucher: PublicProfile; single: PublicProfile; kept: number })[]
+export function useBatches(): UseQueryResult<
+  (Batch & { mashmaker: PublicProfile; catch: PublicProfile; kept: number; consented: number })[]
 > {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`lineups-${userId}`, 'lineups', undefined, [keys.lineups]);
+  useRealtime(`batches-${userId}`, 'batches', undefined, [keys.batches]);
   return useQuery({
-    queryKey: keys.lineups,
+    queryKey: keys.batches,
     enabled: !!userId,
     queryFn: async () => {
-      if (DEMO) return demo.lineups();
+      if (DEMO) return demo.batches();
       const { data, error } = await supabase
-        .from('lineups')
-        .select('*, voucher:voucher_id(*), single:single_id(*), entries:lineup_entries(id, kept)')
+        .from('batches')
+        .select(
+          '*, mashmaker:mashmaker_id(*), catch:catch_id(*), entries:batch_entries(id, kept, consent)',
+        )
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []).map((row: Record<string, unknown>) => {
-        const entries = (row.entries as { kept: boolean }[]) ?? [];
+        const entries = (row.entries as { kept: boolean; consent: string }[]) ?? [];
         return {
-          ...(row as unknown as Lineup),
-          voucher: toPublic(row.voucher as Profile),
-          single: toPublic(row.single as Profile),
+          ...(row as unknown as Batch),
+          mashmaker: toPublic(row.mashmaker as Profile),
+          catch: toPublic(row.catch as Profile),
           kept: entries.filter((e) => e.kept).length,
+          consented: entries.filter((e) => e.kept && e.consent === 'yes').length,
         };
       });
     },
   });
 }
 
-export function useLineup(id: string | undefined): UseQueryResult<LineupWithPeople | null> {
-  useRealtime(`lineup-entries-${id}`, 'lineup_entries', id ? `lineup_id=eq.${id}` : undefined, [
-    keys.lineup(id ?? ''),
+export function useBatch(id: string | undefined): UseQueryResult<BatchWithPeople | null> {
+  useRealtime(`batch-entries-${id}`, 'batch_entries', id ? `batch_id=eq.${id}` : undefined, [
+    keys.batch(id ?? ''),
   ]);
-  useRealtime(`lineup-comments-${id}`, 'lineup_comments', id ? `lineup_id=eq.${id}` : undefined, [
-    keys.lineup(id ?? ''),
+  useRealtime(`batch-comments-${id}`, 'batch_comments', id ? `batch_id=eq.${id}` : undefined, [
+    keys.batch(id ?? ''),
   ]);
   return useQuery({
-    queryKey: keys.lineup(id ?? ''),
+    queryKey: keys.batch(id ?? ''),
     enabled: !!id,
     queryFn: async () => {
-      if (DEMO) return demo.lineup(id!);
+      if (DEMO) return demo.batch(id!);
       const { data, error } = await supabase
-        .from('lineups')
+        .from('batches')
         .select(
-          '*, voucher:voucher_id(*), single:single_id(*), entries:lineup_entries(*, candidate:candidate_id(*)), comments:lineup_comments(*)',
+          '*, mashmaker:mashmaker_id(*), catch:catch_id(*), entries:batch_entries(*, candidate:candidate_id(*)), comments:batch_comments(*)',
         )
         .eq('id', id!)
         .maybeSingle();
       if (error) throw error;
       if (!data) return null;
       const row = data as Record<string, unknown>;
-      const entries = ((row.entries as (LineupEntry & { candidate: Profile })[]) ?? [])
+      const entries = ((row.entries as (BatchEntry & { candidate: Profile })[]) ?? [])
         .map((e) => ({ ...e, candidate: toPublic(e.candidate) }))
-        .sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
-      const comments = ((row.comments as LineupComment[]) ?? []).sort((a, b) =>
+        .sort((a, b) => (a.position ?? 99) - (b.position ?? 99));
+      const comments = ((row.comments as BatchComment[]) ?? []).sort((a, b) =>
         a.created_at.localeCompare(b.created_at),
       );
       return {
-        ...(row as unknown as Lineup),
-        voucher: toPublic(row.voucher as Profile),
-        single: toPublic(row.single as Profile),
+        ...(row as unknown as Batch),
+        mashmaker: toPublic(row.mashmaker as Profile),
+        catch: toPublic(row.catch as Profile),
         entries,
         comments,
       };
@@ -209,106 +250,149 @@ export function useLineup(id: string | undefined): UseQueryResult<LineupWithPeop
   });
 }
 
-export interface IntroWithPeople extends Introduction {
-  single: PublicProfile;
-  candidate: PublicProfile;
-  vouchers: PublicProfile[];
-  /** the person who is not me */
-  other: PublicProfile;
-  lastMessage: Message | null;
+/** Batches where I have been nominated and not yet answered "okay to be shown?". */
+export interface ConsentRequest {
+  entry_id: string;
+  batch_id: string;
+  mashmaker: PublicProfile;
+  catch_first_name: string;
+  created_at: string;
 }
 
-export function useIntros(): UseQueryResult<IntroWithPeople[]> {
+export function useConsentRequests(): UseQueryResult<ConsentRequest[]> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`intros-${userId}`, 'introductions', undefined, [keys.intros]);
+  useRealtime(
+    `consents-${userId}`,
+    'batch_entries',
+    userId ? `candidate_id=eq.${userId}` : undefined,
+    [keys.consents],
+  );
   return useQuery({
-    queryKey: keys.intros,
+    queryKey: keys.consents,
     enabled: !!userId,
     queryFn: async () => {
-      if (DEMO) return demo.intros();
+      if (DEMO) return demo.consentRequests();
       const { data, error } = await supabase
-        .from('introductions')
-        .select('*, single:single_id(*), candidate:candidate_id(*), messages(*)')
-        .order('created_at', { ascending: false });
+        .from('batch_entries')
+        .select(
+          'id, batch_id, consent, kept, batches:batch_id(created_at, mashmaker:mashmaker_id(*), catch:catch_id(first_name))',
+        )
+        .eq('candidate_id', userId!)
+        .eq('consent', 'pending')
+        .eq('kept', true);
       if (error) throw error;
-      const rows = (data ?? []) as (Introduction & {
-        single: Profile;
-        candidate: Profile;
-        messages: Message[];
-      })[];
-      const voucherIds = Array.from(new Set(rows.flatMap((r) => r.voucher_ids)));
-      const { data: vouchers } = voucherIds.length
-        ? await supabase.from('profiles').select('*').in('id', voucherIds)
-        : { data: [] as Profile[] };
-      const byId = new Map((vouchers ?? []).map((v) => [v.id, toPublic(v as Profile)]));
-      return rows.map((r) => {
-        const single = toPublic(r.single);
-        const candidate = toPublic(r.candidate);
-        const msgs = [...(r.messages ?? [])].sort((a, b) =>
-          a.created_at.localeCompare(b.created_at),
-        );
+      return (data ?? []).map((row: Record<string, unknown>) => {
+        const b = row.batches as {
+          created_at: string;
+          mashmaker: Profile;
+          catch: { first_name: string };
+        };
         return {
-          ...r,
-          single,
-          candidate,
-          vouchers: r.voucher_ids.map((id) => byId.get(id)).filter((v): v is PublicProfile => !!v),
-          other: r.single_id === userId ? candidate : single,
-          lastMessage: msgs[msgs.length - 1] ?? null,
+          entry_id: row.id as string,
+          batch_id: row.batch_id as string,
+          mashmaker: toPublic(b.mashmaker),
+          catch_first_name: b.catch.first_name,
+          created_at: b.created_at,
         };
       });
     },
   });
 }
 
-export function useIntro(id: string | undefined): UseQueryResult<IntroWithPeople | null> {
+export interface MashWithPeople extends Mash {
+  catch: PublicProfile;
+  candidate: PublicProfile;
+  mashmakers: PublicProfile[];
+  /** the person who is not me */
+  other: PublicProfile;
+  lastMessage: Message | null;
+}
+
+async function hydrateMashes(
+  rows: (Mash & { catch: Profile; candidate: Profile; messages?: Message[] })[],
+  userId: string,
+): Promise<MashWithPeople[]> {
+  const mashmakerIds = Array.from(new Set(rows.flatMap((r) => r.mashmaker_ids)));
+  const { data: mms } = mashmakerIds.length
+    ? await supabase.from('profiles').select('*').in('id', mashmakerIds)
+    : { data: [] as Profile[] };
+  const byId = new Map((mms ?? []).map((m) => [m.id, toPublic(m as Profile)]));
+  return rows.map((r) => {
+    const c = toPublic(r.catch);
+    const d = toPublic(r.candidate);
+    const msgs = [...(r.messages ?? [])].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    return {
+      ...r,
+      catch: c,
+      candidate: d,
+      mashmakers: r.mashmaker_ids.map((id) => byId.get(id)).filter((m): m is PublicProfile => !!m),
+      other: r.catch_id === userId ? d : c,
+      lastMessage: msgs[msgs.length - 1] ?? null,
+    };
+  });
+}
+
+export function useMashes(): UseQueryResult<MashWithPeople[]> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`intro-${id}`, 'introductions', id ? `id=eq.${id}` : undefined, [
-    keys.intro(id ?? ''),
-    keys.intros,
-  ]);
+  useRealtime(`mashes-${userId}`, 'mashes', undefined, [keys.mashes]);
   return useQuery({
-    queryKey: keys.intro(id ?? ''),
-    enabled: !!id && !!userId,
+    queryKey: keys.mashes,
+    enabled: !!userId,
     queryFn: async () => {
-      if (DEMO) return demo.intro(id!);
+      if (DEMO) return demo.mashes();
       const { data, error } = await supabase
-        .from('introductions')
-        .select('*, single:single_id(*), candidate:candidate_id(*)')
-        .eq('id', id!)
-        .maybeSingle();
+        .from('mashes')
+        .select('*, catch:catch_id(*), candidate:candidate_id(*), messages(*)')
+        .order('created_at', { ascending: false });
       if (error) throw error;
-      if (!data) return null;
-      const r = data as Introduction & { single: Profile; candidate: Profile };
-      const { data: vouchers } = r.voucher_ids.length
-        ? await supabase.from('profiles').select('*').in('id', r.voucher_ids)
-        : { data: [] as Profile[] };
-      const single = toPublic(r.single);
-      const candidate = toPublic(r.candidate);
-      return {
-        ...r,
-        single,
-        candidate,
-        vouchers: (vouchers ?? []).map((v) => toPublic(v as Profile)),
-        other: r.single_id === userId ? candidate : single,
-        lastMessage: null,
-      };
+      return hydrateMashes(
+        (data ?? []) as (Mash & { catch: Profile; candidate: Profile; messages: Message[] })[],
+        userId!,
+      );
     },
   });
 }
 
-export function useMessages(introId: string | undefined): UseQueryResult<Message[]> {
-  useRealtime(`messages-${introId}`, 'messages', introId ? `intro_id=eq.${introId}` : undefined, [
-    keys.messages(introId ?? ''),
+export function useMash(id: string | undefined): UseQueryResult<MashWithPeople | null> {
+  const userId = useSession((s) => s.session?.user.id);
+  useRealtime(`mash-${id}`, 'mashes', id ? `id=eq.${id}` : undefined, [
+    keys.mash(id ?? ''),
+    keys.mashes,
   ]);
   return useQuery({
-    queryKey: keys.messages(introId ?? ''),
-    enabled: !!introId,
+    queryKey: keys.mash(id ?? ''),
+    enabled: !!id && !!userId,
     queryFn: async () => {
-      if (DEMO) return demo.messages(introId!);
+      if (DEMO) return demo.mash(id!);
+      const { data, error } = await supabase
+        .from('mashes')
+        .select('*, catch:catch_id(*), candidate:candidate_id(*)')
+        .eq('id', id!)
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) return null;
+      const [m] = await hydrateMashes(
+        [data as Mash & { catch: Profile; candidate: Profile }],
+        userId!,
+      );
+      return m ?? null;
+    },
+  });
+}
+
+export function useMessages(mashId: string | undefined): UseQueryResult<Message[]> {
+  useRealtime(`messages-${mashId}`, 'messages', mashId ? `mash_id=eq.${mashId}` : undefined, [
+    keys.messages(mashId ?? ''),
+  ]);
+  return useQuery({
+    queryKey: keys.messages(mashId ?? ''),
+    enabled: !!mashId,
+    queryFn: async () => {
+      if (DEMO) return demo.messages(mashId!);
       const { data, error } = await supabase
         .from('messages')
         .select('*')
-        .eq('intro_id', introId!)
+        .eq('mash_id', mashId!)
         .order('created_at', { ascending: true });
       if (error) throw error;
       return (data ?? []) as Message[];
@@ -316,17 +400,36 @@ export function useMessages(introId: string | undefined): UseQueryResult<Message
   });
 }
 
-export function useBrief(introId: string | undefined, subjectId: string | undefined) {
+export function useOutcomes(mashId: string | undefined): UseQueryResult<Outcome[]> {
   return useQuery({
-    queryKey: keys.brief(introId ?? '', subjectId ?? ''),
-    enabled: !!introId && !!subjectId,
+    queryKey: keys.outcomes(mashId ?? ''),
+    enabled: !!mashId,
     queryFn: async () => {
-      if (DEMO) return demo.brief(introId!, subjectId!);
+      if (DEMO) return demo.outcomes(mashId!);
+      const { data, error } = await supabase
+        .from('outcomes')
+        .select('*')
+        .eq('mash_id', mashId!)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []) as Outcome[];
+    },
+  });
+}
+
+/** My brief about the other person in this mash. Only ever mine. */
+export function useBrief(mashId: string | undefined) {
+  const userId = useSession((s) => s.session?.user.id);
+  return useQuery({
+    queryKey: keys.brief(mashId ?? ''),
+    enabled: !!mashId && !!userId,
+    queryFn: async () => {
+      if (DEMO) return demo.brief(mashId!);
       const { data, error } = await supabase
         .from('briefs')
         .select('*')
-        .eq('intro_id', introId!)
-        .eq('subject_id', subjectId!)
+        .eq('mash_id', mashId!)
+        .eq('requester_id', userId!)
         .maybeSingle();
       if (error) throw error;
       return (data as Brief | null) ?? null;
@@ -334,47 +437,50 @@ export function useBrief(introId: string | undefined, subjectId: string | undefi
   });
 }
 
-/** Vouches written about a person, with the voucher's name. Visible per RLS. */
-export function useVouchesFor(singleId: string | undefined) {
+/** Vouches written about a Catch, with the Mashmaker's name. Visible per RLS. */
+export function useVouchesFor(catchId: string | undefined) {
   return useQuery({
-    queryKey: keys.vouchesFor(singleId ?? ''),
-    enabled: !!singleId,
+    queryKey: keys.vouchesFor(catchId ?? ''),
+    enabled: !!catchId,
     queryFn: async () => {
-      if (DEMO) return demo.vouchesFor(singleId!);
+      if (DEMO) return demo.vouchesFor(catchId!);
       const { data, error } = await supabase
         .from('vouches')
-        .select('*, voucher:voucher_id(first_name, photo_url)')
-        .eq('single_id', singleId!)
+        .select('*, mashmaker:mashmaker_id(first_name, photo_url)')
+        .eq('catch_id', catchId!)
         .order('created_at', { ascending: false });
       if (error) throw error;
       return (data ?? []) as {
         id: string;
-        voucher_id: string;
+        mashmaker_id: string;
         prompt: string;
         text: string;
         how_known: string | null;
         created_at: string;
-        voucher: { first_name: string; photo_url: string | null };
+        mashmaker: { first_name: string; photo_url: string | null };
       }[];
     },
   });
 }
 
-// --- voucher ----------------------------------------------------------------
+// --- Mashmaker --------------------------------------------------------------
 
-export function useMySingles(): UseQueryResult<MySingleRow[]> {
+export function useMyCatches(): UseQueryResult<MyCatchRow[]> {
   const userId = useSession((s) => s.session?.user.id);
-  useRealtime(`mysingles-${userId}`, 'vouches', userId ? `voucher_id=eq.${userId}` : undefined, [
-    keys.mySingles,
-  ]);
+  useRealtime(
+    `links-m-${userId}`,
+    'mashmaker_links',
+    userId ? `mashmaker_id=eq.${userId}` : undefined,
+    [keys.catches],
+  );
   return useQuery({
-    queryKey: keys.mySingles,
+    queryKey: keys.catches,
     enabled: !!userId,
     queryFn: async () => {
-      if (DEMO) return demo.mySingles();
-      const { data, error } = await supabase.rpc('my_singles');
+      if (DEMO) return demo.myCatches();
+      const { data, error } = await supabase.rpc('my_catches');
       if (error) throw error;
-      return (data ?? []) as MySingleRow[];
+      return (data ?? []) as MyCatchRow[];
     },
   });
 }
@@ -394,13 +500,13 @@ export function useRecord(): UseQueryResult<RecordRow[]> {
   });
 }
 
-export function useNominatable(singleId: string | undefined): UseQueryResult<NominatableRow[]> {
+export function useNominatable(catchId: string | undefined): UseQueryResult<NominatableRow[]> {
   return useQuery({
-    queryKey: keys.nominatable(singleId ?? ''),
-    enabled: !!singleId,
+    queryKey: keys.nominatable(catchId ?? ''),
+    enabled: !!catchId,
     queryFn: async () => {
-      if (DEMO) return demo.nominatable(singleId!);
-      const { data, error } = await supabase.rpc('nominatable_for', { single: singleId! });
+      if (DEMO) return demo.nominatable(catchId!);
+      const { data, error } = await supabase.rpc('nominatable_for', { catch: catchId! });
       if (error) throw error;
       return (data ?? []) as NominatableRow[];
     },
@@ -420,11 +526,11 @@ export function useVouchPrompt(): UseQueryResult<VouchPrompt> {
   });
 }
 
-/** People in my circle (connections) as public cards. Used by the voucher to pick singles to vouch for. */
+/** People whose contacts matched mine, as public cards with their role. */
 export function useConnections(): UseQueryResult<(PublicProfile & { role: Profile['role'] })[]> {
   const userId = useSession((s) => s.session?.user.id);
   return useQuery({
-    queryKey: ['connections', userId],
+    queryKey: keys.connections,
     enabled: !!userId,
     queryFn: async () => {
       if (DEMO) return demo.connections();
@@ -481,6 +587,23 @@ export function useLinkedProfiles(userId: string | undefined): UseQueryResult<Li
   });
 }
 
+export function useExclusions(): UseQueryResult<ExcludedHash[]> {
+  const userId = useSession((s) => s.session?.user.id);
+  return useQuery({
+    queryKey: keys.exclusions,
+    enabled: !!userId,
+    queryFn: async () => {
+      if (DEMO) return demo.exclusions();
+      const { data, error } = await supabase
+        .from('excluded_hashes')
+        .select('*')
+        .eq('owner_id', userId!);
+      if (error) throw error;
+      return (data ?? []) as ExcludedHash[];
+    },
+  });
+}
+
 export function useNotifications(): UseQueryResult<Notification[]> {
   const userId = useSession((s) => s.session?.user.id);
   useRealtime(
@@ -505,7 +628,6 @@ export function useNotifications(): UseQueryResult<Notification[]> {
   });
 }
 
-/** Invalidate everything after a big write (e.g. finishing onboarding). */
 export function useInvalidateAll() {
   const qc = useQueryClient();
   return () => qc.invalidateQueries();

@@ -1,35 +1,70 @@
--- Mash: friends-of-friends dating for 30 to 50 year olds.
--- One rule: nobody is shown to anybody without a human link between them.
+-- Mash: a dating app where your friends do the matching.
 --
--- Privacy design (NZ Privacy Act 2020, AU Privacy Act 1988):
---   * Contact lists never reach the server as names or numbers. The app hashes
---     each E.164 number on device (SHA-256) and uploads only the hashes.
---   * A nominated person who is not on Mash exists only as a hash and a pending invite.
---     No profile row is created until they sign in themselves.
---   * The due-diligence brief is consent-first: only links the subject added, and the
---     subject sees their own brief before it is sent.
+-- Vocabulary (locked, Brand, Product and Trust Brief, 12 Oct 2026):
+--   Mashmaker  the friend who does the matching. Free forever.
+--   Catch      anyone single on Mash. Symmetrical role.
+--   Machine    the AI layer. One name externally, several agents internally.
+--   Mash       an introduction made by a Mashmaker between two Catches.
+--   Batch      a set of Catches delivered at once when a Mashmaker nominates.
+--   Vouch      the verb for what a Mashmaker does (the note on a nomination).
+--
+-- Principles enforced here: circle not network (no public layer, no search), consent at
+-- every step (asks are rows with a status, nothing is assigned), no ranking of people
+-- (positions order a reveal, nothing scores a person), data minimum (hashes not contacts,
+-- results not documents, briefs deleted when the mash closes).
+--
+-- OPEN decisions are switches in app_settings, never assumptions in code.
 
 create extension if not exists "pgcrypto";
 
 -- ---------------------------------------------------------------------------
 -- Enums
 -- ---------------------------------------------------------------------------
-create type public.user_role as enum ('single', 'voucher');
+create type public.user_role as enum ('catch', 'mashmaker');
 create type public.country_code as enum ('NZ', 'AU');
+create type public.gender_kind as enum ('woman', 'man', 'non_binary', 'prefer_not_to_say');
 create type public.intent_kind as enum ('relationship', 'see_where_it_goes', 'companionship', 'not_sure');
+create type public.link_status as enum ('requested', 'accepted', 'declined', 'ended');
 create type public.invite_status as enum ('pending', 'accepted', 'declined', 'expired');
-create type public.lineup_status as enum ('building', 'ready', 'done');
-create type public.entry_decision as enum ('undecided', 'meet', 'maybe', 'not_this_time');
-create type public.intro_status as enum ('pending', 'mutual', 'declined', 'met', 'closed');
-create type public.outcome_kind as enum ('meeting', 'met', 'no_show', 'dating', 'together', 'ended', 'not_for_me');
+create type public.batch_status as enum ('building', 'consenting', 'ready', 'done');
+create type public.consent_status as enum ('pending', 'yes', 'no');
+create type public.entry_decision as enum ('undecided', 'meet', 'maybe', 'pass');
+create type public.mash_status as enum ('pending', 'mutual', 'declined', 'met', 'closed', 'expired');
+create type public.outcome_kind as enum ('meeting', 'met', 'met_again', 'no_show', 'dating', 'together', 'ended', 'not_for_me');
+create type public.share_level as enum ('nothing', 'met', 'details');
+create type public.visibility_level as enum ('minimal', 'updates');
 create type public.report_status as enum ('open', 'reviewed', 'actioned');
 create type public.linked_kind as enum ('instagram', 'linkedin', 'website', 'other');
 create type public.notification_kind as enum (
-  'lineup_ready', 'intro_mutual', 'outcome', 'nudge', 'vouch_received', 'comment', 'invite_accepted', 'system'
+  'batch_ready', 'consent_request', 'mash_mutual', 'outcome', 'nudge', 'vouch_received',
+  'comment', 'invite_accepted', 'mashmaker_request', 'mashmaker_accepted', 'system'
 );
 
 -- ---------------------------------------------------------------------------
--- Profiles (one per auth user)
+-- Server-side switches for OPEN decisions. Changed without a release.
+-- ---------------------------------------------------------------------------
+create table public.app_settings (
+  key text primary key,
+  value text not null,
+  note text
+);
+
+insert into public.app_settings (key, value, note) values
+  ('trial_days', '21', 'Length of the free trial for Catches.'),
+  ('trial_gate', 'first_batch', 'When the trial clock starts: first_batch or signup. OPEN.'),
+  ('dd_requires_plus', 'true', 'Whether the Machine''s due diligence is a paid feature. OPEN.'),
+  ('batch_max', '5', 'Nominations per batch. Brief: three to five.'),
+  ('verification_mode', 'liveness', 'liveness or id. OPEN.'),
+  ('verification_image_retention_days', '7', 'Identity images deleted after this many days.'),
+  ('intro_expiry_days', '7', 'A pending mash times out after this many days. Shows as "did not go ahead". OPEN.'),
+  ('renomination_block_months', '12', 'A declined, expired or closed pair cannot be re-nominated for this long. OPEN.'),
+  ('mashmaker_cap', '0', 'Most Mashmakers a Catch may have. 0 means no cap. OPEN.'),
+  ('pause_requires_plus', 'false', 'Whether pausing is a paid feature. OPEN.'),
+  ('vouch_min_length', '20', 'Shortest note a Mashmaker may write. Rule 3: say why.');
+
+-- ---------------------------------------------------------------------------
+-- Profiles (one per auth user). A person is a Catch or a Mashmaker by primary role,
+-- and anyone may be a Mashmaker for others.
 -- ---------------------------------------------------------------------------
 create table public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
@@ -41,16 +76,31 @@ create table public.profiles (
   city text,
   country public.country_code,
   bio text,
+  -- declared at onboarding, enforced in matching, never shown to others as a badge or filter
+  gender public.gender_kind,
+  seeking public.gender_kind[] not null default '{}',
   -- own phone, hashed on device, so friends' contact hashes can find this user
   phone_hash text unique,
+  -- Consent at every step: being matchable is its own yes, separate from signup
+  open_to_matching boolean not null default false,
+  -- entitlement: paid, or inside the trial
   is_plus boolean not null default false,
   plus_until timestamptz,
+  trial_started_at timestamptz,
+  trial_ends_at timestamptz,
   paused boolean not null default false,
   onboarding_complete boolean not null default false,
-  verified_photo boolean not null default false,
-  verified_social boolean not null default false,
-  brief_consent boolean not null default false,
-  reverse_image_consent boolean not null default false,
+  -- the Machine's verification agent keeps results, never documents
+  verified_identity boolean not null default false,
+  photos_current boolean not null default false,
+  verified_at timestamptz,
+  -- "Let the Machine run checks on me": specific, visible in settings
+  dd_consent boolean not null default false,
+  -- what my Mashmakers learn after an intro. Default minimal.
+  mashmaker_visibility public.visibility_level not null default 'minimal',
+  -- the rules shown at onboarding, accepted once per role
+  catch_rules_accepted_at timestamptz,
+  mashmaker_rules_accepted_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint profiles_adult check (date_of_birth is null or date_of_birth <= (current_date - interval '18 years'))
@@ -58,7 +108,6 @@ create table public.profiles (
 
 create index profiles_phone_hash_idx on public.profiles (phone_hash);
 
--- Create a profile row the moment a user signs up. Name and photo come from the social login.
 create or replace function public.handle_new_user()
 returns trigger
 language plpgsql
@@ -68,13 +117,17 @@ as $$
 declare
   meta jsonb := coalesce(new.raw_user_meta_data, '{}'::jsonb);
   full_name text := coalesce(meta->>'full_name', meta->>'name', '');
+  gate text := (select value from public.app_settings where key = 'trial_gate');
+  days int := coalesce((select value::int from public.app_settings where key = 'trial_days'), 21);
 begin
-  insert into public.profiles (id, first_name, last_name, photo_url)
+  insert into public.profiles (id, first_name, last_name, photo_url, trial_started_at, trial_ends_at)
   values (
     new.id,
     coalesce(meta->>'first_name', meta->>'given_name', split_part(full_name, ' ', 1), ''),
     coalesce(meta->>'last_name', meta->>'family_name', nullif(regexp_replace(full_name, '^\S+\s*', ''), ''), ''),
-    coalesce(meta->>'avatar_url', meta->>'picture')
+    coalesce(meta->>'avatar_url', meta->>'picture'),
+    case when gate = 'signup' then now() else null end,
+    case when gate = 'signup' then now() + make_interval(days => days) else null end
   )
   on conflict (id) do nothing;
   return new;
@@ -96,13 +149,43 @@ $$;
 create trigger profiles_touch before update on public.profiles
   for each row execute function public.touch_updated_at();
 
+-- Only the service role may change entitlements, verification results or the phone hash.
+create or replace function public.protect_profile_columns()
+returns trigger language plpgsql as $$
+begin
+  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then
+    new.is_plus := old.is_plus;
+    new.plus_until := old.plus_until;
+    new.trial_started_at := old.trial_started_at;
+    new.trial_ends_at := old.trial_ends_at;
+    new.verified_identity := old.verified_identity;
+    new.photos_current := old.photos_current;
+    new.verified_at := old.verified_at;
+    new.phone_hash := old.phone_hash;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger profiles_protect before update on public.profiles
+  for each row execute function public.protect_profile_columns();
+
+-- Paid, or inside the trial.
+create or replace function public.is_entitled(who uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.profiles p
+    where p.id = who and (p.is_plus or (p.trial_ends_at is not null and p.trial_ends_at > now()))
+  );
+$$;
+
 -- ---------------------------------------------------------------------------
--- Criteria: the five questions a single answers once
+-- Criteria: what a Catch wants. Shown to their Mashmakers, never to other Catches.
 -- ---------------------------------------------------------------------------
 create table public.criteria (
-  single_id uuid primary key references public.profiles (id) on delete cascade,
-  age_min int not null default 30 check (age_min >= 18),
-  age_max int not null default 50 check (age_max >= age_min),
+  catch_id uuid primary key references public.profiles (id) on delete cascade,
+  age_min int not null default 25 check (age_min >= 18),
+  age_max int not null default 60 check (age_max >= age_min),
   radius_km int not null default 30 check (radius_km between 5 and 500),
   dealbreakers text[] not null default '{}',
   intent public.intent_kind not null default 'not_sure',
@@ -114,7 +197,7 @@ create trigger criteria_touch before update on public.criteria
   for each row execute function public.touch_updated_at();
 
 -- ---------------------------------------------------------------------------
--- Contact graph. Only hashes, never names or numbers.
+-- Contact graph. Only hashes, never names or numbers. Non-users are invisible.
 -- ---------------------------------------------------------------------------
 create table public.contact_hashes (
   owner_id uuid not null references public.profiles (id) on delete cascade,
@@ -125,7 +208,15 @@ create table public.contact_hashes (
 
 create index contact_hashes_hash_idx on public.contact_hashes (hash);
 
--- A link between two Mash users. Rows are normalised so user_a < user_b.
+-- Exclusion list: people who must never be surfaced to or by this user. Silent, permanent.
+create table public.excluded_hashes (
+  owner_id uuid not null references public.profiles (id) on delete cascade,
+  hash text not null,
+  created_at timestamptz not null default now(),
+  primary key (owner_id, hash)
+);
+
+-- A link between two Mash users whose contacts matched. Normalised so user_a < user_b.
 create table public.connections (
   user_a uuid not null references public.profiles (id) on delete cascade,
   user_b uuid not null references public.profiles (id) on delete cascade,
@@ -138,27 +229,59 @@ create table public.connections (
 create index connections_user_b_idx on public.connections (user_b);
 
 -- ---------------------------------------------------------------------------
--- Nominations and invites
+-- Invites to people not on Mash. Sent from the Mashmaker's own phone, in their words.
+-- Stored only as a hash and a pending invite. No profile until they sign in themselves.
 -- ---------------------------------------------------------------------------
-create table public.nominations (
+create table public.invites (
   id uuid primary key default gen_random_uuid(),
-  voucher_id uuid not null references public.profiles (id) on delete cascade,
-  -- the nominee as the voucher's phone hash of them; resolved to a user once they join
-  nominee_hash text not null,
-  nominee_user_id uuid references public.profiles (id) on delete set null,
+  inviter_id uuid not null references public.profiles (id) on delete cascade,
+  invitee_hash text not null,
+  invitee_user_id uuid references public.profiles (id) on delete set null,
   invite_code text not null unique default encode(gen_random_bytes(6), 'hex'),
-  invite_message text,
+  message text,
   status public.invite_status not null default 'pending',
   created_at timestamptz not null default now(),
   accepted_at timestamptz,
-  unique (voucher_id, nominee_hash)
+  unique (inviter_id, invitee_hash)
 );
 
-create index nominations_nominee_hash_idx on public.nominations (nominee_hash);
-create index nominations_nominee_user_idx on public.nominations (nominee_user_id);
+create index invites_invitee_hash_idx on public.invites (invitee_hash);
 
 -- ---------------------------------------------------------------------------
--- Vouches: one rotating prompt, answered in a sentence
+-- Mashmaker links. A Catch asks, the Mashmaker accepts. Neither can be assigned.
+-- ---------------------------------------------------------------------------
+create table public.mashmaker_links (
+  id uuid primary key default gen_random_uuid(),
+  catch_id uuid not null references public.profiles (id) on delete cascade,
+  mashmaker_id uuid not null references public.profiles (id) on delete cascade,
+  status public.link_status not null default 'requested',
+  requested_by uuid not null references public.profiles (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  answered_at timestamptz,
+  unique (catch_id, mashmaker_id),
+  constraint link_not_self check (catch_id <> mashmaker_id)
+);
+
+create index mashmaker_links_mashmaker_idx on public.mashmaker_links (mashmaker_id, status);
+
+create or replace function public.is_mashmaker_of(mashmaker uuid, catch uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.mashmaker_links l
+    where l.mashmaker_id = mashmaker and l.catch_id = catch and l.status = 'accepted'
+  );
+$$;
+
+-- OPEN: a cap on Mashmakers per Catch. 0 means none. Counts asked and accepted.
+create or replace function public.under_mashmaker_cap(catch uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select coalesce((select value from public.app_settings where key = 'mashmaker_cap'), '0')::int = 0
+    or (select count(*) from public.mashmaker_links l where l.catch_id = catch and l.status in ('requested', 'accepted'))
+       < coalesce((select value from public.app_settings where key = 'mashmaker_cap'), '0')::int;
+$$;
+
+-- ---------------------------------------------------------------------------
+-- Vouches: the Mashmaker's short note on why. Shown to the other Catch word for word.
 -- ---------------------------------------------------------------------------
 create table public.vouch_prompts (
   id serial primary key,
@@ -178,91 +301,99 @@ insert into public.vouch_prompts (text) values
 
 create table public.vouches (
   id uuid primary key default gen_random_uuid(),
-  voucher_id uuid not null references public.profiles (id) on delete cascade,
-  single_id uuid not null references public.profiles (id) on delete cascade,
+  mashmaker_id uuid not null references public.profiles (id) on delete cascade,
+  catch_id uuid not null references public.profiles (id) on delete cascade,
   prompt_id int references public.vouch_prompts (id),
   prompt text not null,
   text text not null check (char_length(text) between 10 and 400),
   how_known text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  unique (voucher_id, single_id),
-  constraint vouches_not_self check (voucher_id <> single_id)
+  unique (mashmaker_id, catch_id),
+  constraint vouches_not_self check (mashmaker_id <> catch_id)
 );
 
-create index vouches_single_idx on public.vouches (single_id);
+create index vouches_catch_idx on public.vouches (catch_id);
 create trigger vouches_touch before update on public.vouches
   for each row execute function public.touch_updated_at();
 
 -- ---------------------------------------------------------------------------
--- Lineups: Holly nominates ten, the agent keeps seven
+-- Batches. A Mashmaker nominates up to batch_max Catches from their own circle. The Machine
+-- filters mismatches before the Mashmaker sees them and writes the reason for each. Every
+-- nominee is asked before the Catch sees them. One batch open at a time.
 -- ---------------------------------------------------------------------------
-create table public.lineups (
+create table public.batches (
   id uuid primary key default gen_random_uuid(),
-  voucher_id uuid not null references public.profiles (id) on delete cascade,
-  single_id uuid not null references public.profiles (id) on delete cascade,
-  status public.lineup_status not null default 'building',
-  agent_note_to_voucher text,
+  mashmaker_id uuid not null references public.profiles (id) on delete cascade,
+  catch_id uuid not null references public.profiles (id) on delete cascade,
+  status public.batch_status not null default 'building',
+  machine_note text,
   created_at timestamptz not null default now(),
   ready_at timestamptz,
   done_at timestamptz
 );
 
-create index lineups_single_idx on public.lineups (single_id, created_at desc);
-create index lineups_voucher_idx on public.lineups (voucher_id, created_at desc);
+create index batches_catch_idx on public.batches (catch_id, created_at desc);
+create index batches_mashmaker_idx on public.batches (mashmaker_id, created_at desc);
 
-create table public.lineup_entries (
+create table public.batch_entries (
   id uuid primary key default gen_random_uuid(),
-  lineup_id uuid not null references public.lineups (id) on delete cascade,
+  batch_id uuid not null references public.batches (id) on delete cascade,
   candidate_id uuid not null references public.profiles (id) on delete cascade,
   kept boolean not null default true,
-  rank int,
+  -- reveal order only. Nothing here scores a person.
+  position int,
   reason text,
   dropped_reason text,
-  voucher_overrode boolean not null default false,
+  mashmaker_overrode boolean not null default false,
+  -- the nominee's yes in principle, before the Catch sees them
+  consent public.consent_status not null default 'pending',
+  consent_at timestamptz,
   decision public.entry_decision not null default 'undecided',
   decided_at timestamptz,
   revealed_at timestamptz,
-  unique (lineup_id, candidate_id)
+  unique (batch_id, candidate_id)
 );
 
-create index lineup_entries_candidate_idx on public.lineup_entries (candidate_id);
+create index batch_entries_candidate_idx on public.batch_entries (candidate_id);
 
-create table public.lineup_comments (
+create table public.batch_comments (
   id uuid primary key default gen_random_uuid(),
-  lineup_id uuid not null references public.lineups (id) on delete cascade,
-  entry_id uuid references public.lineup_entries (id) on delete cascade,
+  batch_id uuid not null references public.batches (id) on delete cascade,
+  entry_id uuid references public.batch_entries (id) on delete cascade,
   author_id uuid not null references public.profiles (id) on delete cascade,
   text text not null check (char_length(text) between 1 and 200),
   created_at timestamptz not null default now()
 );
 
-create index lineup_comments_lineup_idx on public.lineup_comments (lineup_id, created_at);
+create index batch_comments_batch_idx on public.batch_comments (batch_id, created_at);
 
 -- ---------------------------------------------------------------------------
--- Introductions and chat
+-- Mashes (introductions) and chat. Both Catches always know who introduced them.
 -- ---------------------------------------------------------------------------
-create table public.introductions (
+create table public.mashes (
   id uuid primary key default gen_random_uuid(),
-  single_id uuid not null references public.profiles (id) on delete cascade,
+  catch_id uuid not null references public.profiles (id) on delete cascade,
   candidate_id uuid not null references public.profiles (id) on delete cascade,
-  voucher_ids uuid[] not null default '{}',
-  lineup_entry_id uuid references public.lineup_entries (id) on delete set null,
-  single_decision public.entry_decision not null default 'undecided',
+  mashmaker_ids uuid[] not null default '{}',
+  batch_entry_id uuid references public.batch_entries (id) on delete set null,
+  catch_decision public.entry_decision not null default 'undecided',
   candidate_decision public.entry_decision not null default 'undecided',
-  status public.intro_status not null default 'pending',
+  status public.mash_status not null default 'pending',
   created_at timestamptz not null default now(),
+  -- a pending mash times out (intro_expiry_days). Nobody is told why, because there is no why.
+  expires_at timestamptz,
   opened_at timestamptz,
   closed_at timestamptz,
-  unique (single_id, candidate_id),
-  constraint intro_not_self check (single_id <> candidate_id)
+  unique (catch_id, candidate_id),
+  constraint mash_not_self check (catch_id <> candidate_id)
 );
 
-create index introductions_candidate_idx on public.introductions (candidate_id);
+create index mashes_candidate_idx on public.mashes (candidate_id);
 
 create table public.messages (
   id uuid primary key default gen_random_uuid(),
-  intro_id uuid not null references public.introductions (id) on delete cascade,
+  mash_id uuid not null references public.mashes (id) on delete cascade,
   -- null sender = the vouch that opens the chat, or a system line
   sender_id uuid references public.profiles (id) on delete set null,
   body text not null check (char_length(body) between 1 and 2000),
@@ -270,22 +401,26 @@ create table public.messages (
   created_at timestamptz not null default now()
 );
 
-create index messages_intro_idx on public.messages (intro_id, created_at);
+create index messages_mash_idx on public.messages (mash_id, created_at);
 
+-- Light report back. "met, going again" is the company's north metric.
+-- share: what the Catch's Mashmakers learn about this outcome. Asked each time.
 create table public.outcomes (
   id uuid primary key default gen_random_uuid(),
-  intro_id uuid not null references public.introductions (id) on delete cascade,
+  mash_id uuid not null references public.mashes (id) on delete cascade,
   reported_by uuid not null references public.profiles (id) on delete cascade,
   outcome public.outcome_kind not null,
+  share public.share_level not null default 'nothing',
   note text,
   when_at timestamptz,
   created_at timestamptz not null default now()
 );
 
-create index outcomes_intro_idx on public.outcomes (intro_id, created_at desc);
+create index outcomes_mash_idx on public.outcomes (mash_id, created_at desc);
 
 -- ---------------------------------------------------------------------------
--- Due diligence (consent-first)
+-- Due diligence. Public sources only. Shown only to the Catch who asked. Never to the
+-- Mashmaker, never to the subject. Deleted when the mash closes.
 -- ---------------------------------------------------------------------------
 create table public.linked_profiles (
   id uuid primary key default gen_random_uuid(),
@@ -298,13 +433,26 @@ create table public.linked_profiles (
 
 create table public.briefs (
   id uuid primary key default gen_random_uuid(),
-  intro_id uuid not null references public.introductions (id) on delete cascade,
+  mash_id uuid not null references public.mashes (id) on delete cascade,
+  requester_id uuid not null references public.profiles (id) on delete cascade,
   subject_id uuid not null references public.profiles (id) on delete cascade,
   content jsonb not null,
-  subject_approved boolean not null default false,
   generated_at timestamptz not null default now(),
-  unique (intro_id, subject_id)
+  unique (mash_id, requester_id)
 );
+
+create or replace function public.purge_briefs_on_close()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.status in ('declined', 'closed') and old.status not in ('declined', 'closed') then
+    delete from public.briefs where mash_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger mashes_purge_briefs after update of status on public.mashes
+  for each row execute function public.purge_briefs_on_close();
 
 -- ---------------------------------------------------------------------------
 -- Safety
@@ -322,6 +470,8 @@ create table public.reports (
   reported_id uuid not null references public.profiles (id) on delete cascade,
   reason text not null,
   details text,
+  -- what the reporter's Mashmakers learn. The reporter chooses.
+  share public.share_level not null default 'nothing',
   status public.report_status not null default 'open',
   created_at timestamptz not null default now(),
   reviewed_at timestamptz
@@ -369,8 +519,20 @@ returns boolean language sql stable security definer set search_path = public as
   );
 $$;
 
--- Who may see a profile: yourself, people you are connected to, anyone sharing a
--- lineup or introduction with you, and vouchers of singles you share a lineup with.
+-- Either person has the other on their exclusion list.
+create or replace function public.is_excluded_either_way(a uuid, b uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.excluded_hashes x
+    join public.profiles p on p.phone_hash = x.hash
+    where (x.owner_id = a and p.id = b) or (x.owner_id = b and p.id = a)
+  );
+$$;
+
+-- Who may see a profile. There is no public layer.
+--   yourself; your Mashmakers and the Catches you Mashmake for (any link state, so a
+--   request can be read); a nominee who has said yes and the Catch of that batch;
+--   both sides of a mash and its Mashmakers.
 create or replace function public.can_see_profile(viewer uuid, target uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select
@@ -380,81 +542,66 @@ returns boolean language sql stable security definer set search_path = public as
       and (
         public.are_connected(viewer, target)
         or exists (
-          select 1 from public.lineups l
-          where (l.single_id = viewer and l.voucher_id = target)
-             or (l.voucher_id = viewer and l.single_id = target)
+          select 1 from public.mashmaker_links l
+          where (l.catch_id = viewer and l.mashmaker_id = target)
+             or (l.mashmaker_id = viewer and l.catch_id = target)
+        )
+        -- the Catch sees nominees who said yes; the Mashmaker sees their own nominees
+        or exists (
+          select 1 from public.batch_entries e
+          join public.batches b on b.id = e.batch_id
+          where e.candidate_id = target and e.kept
+            and ((b.catch_id = viewer and e.consent = 'yes') or b.mashmaker_id = viewer)
+        )
+        -- a nominee sees the Catch and the Mashmaker of the batch they were asked about
+        or exists (
+          select 1 from public.batch_entries e
+          join public.batches b on b.id = e.batch_id
+          where e.candidate_id = viewer and e.kept and (b.catch_id = target or b.mashmaker_id = target)
         )
         or exists (
-          select 1 from public.lineup_entries e
-          join public.lineups l on l.id = e.lineup_id
-          where e.candidate_id = target and e.kept and (l.single_id = viewer or l.voucher_id = viewer)
-        )
-        or exists (
-          select 1 from public.lineup_entries e
-          join public.lineups l on l.id = e.lineup_id
-          where e.candidate_id = viewer and e.kept and e.decision in ('meet', 'maybe')
-            and (l.single_id = target or l.voucher_id = target)
-        )
-        or exists (
-          select 1 from public.introductions i
-          where (i.single_id = viewer and i.candidate_id = target)
-             or (i.candidate_id = viewer and i.single_id = target)
-             or (viewer = any(i.voucher_ids) and (i.single_id = target or i.candidate_id = target))
-             or (target = any(i.voucher_ids) and (i.single_id = viewer or i.candidate_id = viewer))
-        )
-        or exists (
-          select 1 from public.vouches v
-          where (v.voucher_id = viewer and v.single_id = target)
-             or (v.single_id = viewer and v.voucher_id = target)
+          select 1 from public.mashes m
+          where (m.catch_id = viewer and m.candidate_id = target)
+             or (m.candidate_id = viewer and m.catch_id = target)
+             or (viewer = any(m.mashmaker_ids) and (m.catch_id = target or m.candidate_id = target))
+             or (target = any(m.mashmaker_ids) and (m.catch_id = viewer or m.candidate_id = viewer))
         )
       )
     );
 $$;
 
-create or replace function public.is_lineup_party(lineup uuid, who uuid)
+create or replace function public.is_batch_party(batch uuid, who uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from public.lineups l where l.id = lineup and (l.single_id = who or l.voucher_id = who)
+    select 1 from public.batches b where b.id = batch and (b.catch_id = who or b.mashmaker_id = who)
   );
 $$;
 
-create or replace function public.is_intro_party(intro uuid, who uuid)
+create or replace function public.is_mash_party(mash uuid, who uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
-    select 1 from public.introductions i
-    where i.id = intro and (i.single_id = who or i.candidate_id = who or who = any(i.voucher_ids))
+    select 1 from public.mashes m
+    where m.id = mash and (m.catch_id = who or m.candidate_id = who or who = any(m.mashmaker_ids))
   );
 $$;
-
--- Circle size: how many people vouch for this single. Matches unlock at 10 is a product
--- rule enforced in the app and in build-lineup, not here, so it can be tuned.
-create or replace function public.circle_size(single uuid)
-returns int language sql stable security definer set search_path = public as $$
-  select count(*)::int from public.vouches where single_id = single;
-$$;
-
--- Record a vouch chain for a couple. Used by the app when an outcome is "together".
-create or replace view public.intro_chains as
-  select i.id as intro_id, i.single_id, i.candidate_id, i.voucher_ids, o.outcome, o.created_at
-  from public.introductions i
-  join lateral (
-    select outcome, created_at from public.outcomes where intro_id = i.id order by created_at desc limit 1
-  ) o on true;
 
 -- ---------------------------------------------------------------------------
 -- Row level security
 -- ---------------------------------------------------------------------------
+alter table public.app_settings enable row level security;
 alter table public.profiles enable row level security;
 alter table public.criteria enable row level security;
 alter table public.contact_hashes enable row level security;
+alter table public.excluded_hashes enable row level security;
 alter table public.connections enable row level security;
-alter table public.nominations enable row level security;
+alter table public.invites enable row level security;
+alter table public.mashmaker_links enable row level security;
 alter table public.vouch_prompts enable row level security;
 alter table public.vouches enable row level security;
-alter table public.lineups enable row level security;
-alter table public.lineup_entries enable row level security;
-alter table public.lineup_comments enable row level security;
-alter table public.introductions enable row level security;
+alter table public.batches enable row level security;
+alter table public.batch_entries enable row level security;
+alter table public.batch_comments enable row level security;
+alter table public.mashes enable row level security;
 alter table public.messages enable row level security;
 alter table public.outcomes enable row level security;
 alter table public.linked_profiles enable row level security;
@@ -464,150 +611,143 @@ alter table public.reports enable row level security;
 alter table public.push_tokens enable row level security;
 alter table public.notifications enable row level security;
 
+create policy "app_settings: read" on public.app_settings
+  for select using (auth.role() = 'authenticated');
+
 -- profiles
 create policy "profiles: read self or linked" on public.profiles
   for select using (public.can_see_profile(auth.uid(), id));
 create policy "profiles: update self" on public.profiles
   for update using (auth.uid() = id) with check (auth.uid() = id);
--- inserts happen via trigger; no client insert policy on purpose
 
--- criteria: only the single and vouchers who vouch for them
-create policy "criteria: read self or voucher" on public.criteria
-  for select using (
-    auth.uid() = single_id
-    or exists (select 1 from public.vouches v where v.single_id = criteria.single_id and v.voucher_id = auth.uid())
-  );
+-- criteria: the Catch and their accepted Mashmakers
+create policy "criteria: read self or mashmaker" on public.criteria
+  for select using (auth.uid() = catch_id or public.is_mashmaker_of(auth.uid(), catch_id));
 create policy "criteria: upsert self" on public.criteria
-  for insert with check (auth.uid() = single_id);
+  for insert with check (auth.uid() = catch_id);
 create policy "criteria: update self" on public.criteria
-  for update using (auth.uid() = single_id) with check (auth.uid() = single_id);
+  for update using (auth.uid() = catch_id) with check (auth.uid() = catch_id);
 
--- contact hashes: write-only from the client; matching happens in an edge function
-create policy "contact_hashes: insert own" on public.contact_hashes
-  for insert with check (auth.uid() = owner_id);
-create policy "contact_hashes: delete own" on public.contact_hashes
-  for delete using (auth.uid() = owner_id);
-create policy "contact_hashes: read own" on public.contact_hashes
-  for select using (auth.uid() = owner_id);
+-- contact hashes and exclusions: own rows only
+create policy "contact_hashes: own" on public.contact_hashes
+  for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
+create policy "excluded_hashes: own" on public.excluded_hashes
+  for all using (auth.uid() = owner_id) with check (auth.uid() = owner_id);
 
 -- connections: read your own edges; written by the service role only
 create policy "connections: read own" on public.connections
   for select using (auth.uid() = user_a or auth.uid() = user_b);
 
--- nominations
-create policy "nominations: voucher reads own" on public.nominations
-  for select using (auth.uid() = voucher_id or auth.uid() = nominee_user_id);
-create policy "nominations: voucher inserts" on public.nominations
-  for insert with check (auth.uid() = voucher_id);
-create policy "nominations: voucher updates own" on public.nominations
-  for update using (auth.uid() = voucher_id) with check (auth.uid() = voucher_id);
-create policy "nominations: voucher deletes own" on public.nominations
-  for delete using (auth.uid() = voucher_id);
+-- invites
+create policy "invites: inviter or invitee reads" on public.invites
+  for select using (auth.uid() = inviter_id or auth.uid() = invitee_user_id);
+create policy "invites: inviter writes" on public.invites
+  for insert with check (auth.uid() = inviter_id);
+create policy "invites: inviter updates" on public.invites
+  for update using (auth.uid() = inviter_id) with check (auth.uid() = inviter_id);
+create policy "invites: inviter deletes" on public.invites
+  for delete using (auth.uid() = inviter_id);
 
--- prompts are public to signed-in users
+-- mashmaker links: either side reads; a Catch asks (or a Mashmaker offers); the other answers
+create policy "links: parties read" on public.mashmaker_links
+  for select using (auth.uid() = catch_id or auth.uid() = mashmaker_id);
+create policy "links: ask or offer" on public.mashmaker_links
+  for insert with check (
+    auth.uid() = requested_by
+    and (auth.uid() = catch_id or auth.uid() = mashmaker_id)
+    and public.are_connected(catch_id, mashmaker_id)
+    and not public.is_blocked_either_way(catch_id, mashmaker_id)
+    and public.under_mashmaker_cap(catch_id)
+  );
+create policy "links: parties update" on public.mashmaker_links
+  for update using (auth.uid() = catch_id or auth.uid() = mashmaker_id)
+  with check (auth.uid() = catch_id or auth.uid() = mashmaker_id);
+
 create policy "vouch_prompts: read" on public.vouch_prompts
   for select using (auth.role() = 'authenticated');
 
--- vouches: visible to the voucher, the single, and anyone who can see the single via a lineup/intro
+-- vouches: the Mashmaker, the Catch, and anyone who may see the Catch (a nominee, the other side of a mash)
 create policy "vouches: read" on public.vouches
-  for select using (
-    auth.uid() = voucher_id
-    or auth.uid() = single_id
-    or public.can_see_profile(auth.uid(), single_id)
-  );
-create policy "vouches: voucher writes" on public.vouches
-  for insert with check (auth.uid() = voucher_id and public.are_connected(voucher_id, single_id));
-create policy "vouches: voucher updates" on public.vouches
-  for update using (auth.uid() = voucher_id) with check (auth.uid() = voucher_id);
-create policy "vouches: voucher deletes" on public.vouches
-  for delete using (auth.uid() = voucher_id);
+  for select using (auth.uid() = mashmaker_id or auth.uid() = catch_id or public.can_see_profile(auth.uid(), catch_id));
+create policy "vouches: mashmaker writes" on public.vouches
+  for insert with check (auth.uid() = mashmaker_id and public.is_mashmaker_of(mashmaker_id, catch_id));
+create policy "vouches: mashmaker updates" on public.vouches
+  for update using (auth.uid() = mashmaker_id) with check (auth.uid() = mashmaker_id);
+create policy "vouches: mashmaker deletes" on public.vouches
+  for delete using (auth.uid() = mashmaker_id);
 
--- lineups: the single and the voucher. Created by build-lineup (service role).
-create policy "lineups: parties read" on public.lineups
-  for select using (public.is_lineup_party(id, auth.uid()));
+-- batches: created by build-batch (service role)
+create policy "batches: parties read" on public.batches
+  for select using (public.is_batch_party(id, auth.uid()));
 
-create policy "lineup_entries: parties read" on public.lineup_entries
+-- entries: the Mashmaker sees all; the Catch sees kept entries whose nominee said yes;
+-- a nominee sees their own entry (to answer the consent ask)
+create policy "batch_entries: read" on public.batch_entries
   for select using (
-    public.is_lineup_party(lineup_id, auth.uid())
-    or (candidate_id = auth.uid() and decision in ('meet', 'maybe'))
+    exists (select 1 from public.batches b where b.id = batch_id and b.mashmaker_id = auth.uid())
+    or (consent = 'yes' and kept and exists (select 1 from public.batches b where b.id = batch_id and b.catch_id = auth.uid()))
+    or candidate_id = auth.uid()
   );
--- the single decides, the voucher may override one drop
-create policy "lineup_entries: single decides" on public.lineup_entries
+create policy "batch_entries: parties update" on public.batch_entries
   for update using (
-    exists (select 1 from public.lineups l where l.id = lineup_id and (l.single_id = auth.uid() or l.voucher_id = auth.uid()))
+    candidate_id = auth.uid()
+    or exists (select 1 from public.batches b where b.id = batch_id and (b.catch_id = auth.uid() or b.mashmaker_id = auth.uid()))
   ) with check (
-    exists (select 1 from public.lineups l where l.id = lineup_id and (l.single_id = auth.uid() or l.voucher_id = auth.uid()))
+    candidate_id = auth.uid()
+    or exists (select 1 from public.batches b where b.id = batch_id and (b.catch_id = auth.uid() or b.mashmaker_id = auth.uid()))
   );
 
-create policy "lineup_comments: parties read" on public.lineup_comments
-  for select using (public.is_lineup_party(lineup_id, auth.uid()));
-create policy "lineup_comments: parties write" on public.lineup_comments
-  for insert with check (auth.uid() = author_id and public.is_lineup_party(lineup_id, auth.uid()));
+create policy "batch_comments: parties read" on public.batch_comments
+  for select using (public.is_batch_party(batch_id, auth.uid()));
+create policy "batch_comments: parties write" on public.batch_comments
+  for insert with check (auth.uid() = author_id and public.is_batch_party(batch_id, auth.uid()));
 
--- introductions
-create policy "introductions: parties read" on public.introductions
-  for select using (public.is_intro_party(id, auth.uid()));
-create policy "introductions: parties update" on public.introductions
-  for update using (auth.uid() = single_id or auth.uid() = candidate_id)
-  with check (auth.uid() = single_id or auth.uid() = candidate_id);
+-- mashes
+create policy "mashes: parties read" on public.mashes
+  for select using (public.is_mash_party(id, auth.uid()));
+create policy "mashes: catches update" on public.mashes
+  for update using (auth.uid() = catch_id or auth.uid() = candidate_id)
+  with check (auth.uid() = catch_id or auth.uid() = candidate_id);
 
--- messages: only once the intro is mutual, and only the two people in it
-create policy "messages: parties read" on public.messages
+-- messages: only the two Catches, only once mutual. Mashmakers never read conversations.
+create policy "messages: catches read" on public.messages
   for select using (
-    exists (
-      select 1 from public.introductions i
-      where i.id = intro_id and (i.single_id = auth.uid() or i.candidate_id = auth.uid())
-    )
+    exists (select 1 from public.mashes m where m.id = mash_id and (m.catch_id = auth.uid() or m.candidate_id = auth.uid()))
   );
-create policy "messages: parties write when mutual" on public.messages
+create policy "messages: catches write when mutual" on public.messages
   for insert with check (
     auth.uid() = sender_id
     and not is_vouch
     and exists (
-      select 1 from public.introductions i
-      where i.id = intro_id
-        and i.status in ('mutual', 'met')
-        and (i.single_id = auth.uid() or i.candidate_id = auth.uid())
-        and not public.is_blocked_either_way(i.single_id, i.candidate_id)
+      select 1 from public.mashes m
+      where m.id = mash_id
+        and m.status in ('mutual', 'met')
+        and (m.catch_id = auth.uid() or m.candidate_id = auth.uid())
+        and not public.is_blocked_either_way(m.catch_id, m.candidate_id)
     )
   );
 
-create policy "outcomes: parties read" on public.outcomes
-  for select using (public.is_intro_party(intro_id, auth.uid()));
-create policy "outcomes: single or candidate write" on public.outcomes
+-- outcomes: the reporter always; the other Catch; a Mashmaker only what was shared with them
+create policy "outcomes: read" on public.outcomes
+  for select using (
+    auth.uid() = reported_by
+    or exists (select 1 from public.mashes m where m.id = mash_id and (m.catch_id = auth.uid() or m.candidate_id = auth.uid()))
+    or (share <> 'nothing' and exists (select 1 from public.mashes m where m.id = mash_id and auth.uid() = any(m.mashmaker_ids)))
+  );
+create policy "outcomes: catches write" on public.outcomes
   for insert with check (
     auth.uid() = reported_by
-    and exists (select 1 from public.introductions i where i.id = intro_id and (i.single_id = auth.uid() or i.candidate_id = auth.uid()))
+    and exists (select 1 from public.mashes m where m.id = mash_id and (m.catch_id = auth.uid() or m.candidate_id = auth.uid()))
   );
 
--- linked profiles: own, plus visible to the other side of a mutual intro once consent is on
+-- linked profiles: own only. The Machine reads them with the service role, with consent.
 create policy "linked_profiles: own" on public.linked_profiles
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "linked_profiles: mutual intro read" on public.linked_profiles
-  for select using (
-    exists (
-      select 1 from public.introductions i
-      join public.profiles p on p.id = linked_profiles.user_id
-      where i.status in ('mutual', 'met') and p.brief_consent
-        and ((i.single_id = auth.uid() and i.candidate_id = linked_profiles.user_id)
-          or (i.candidate_id = auth.uid() and i.single_id = linked_profiles.user_id))
-    )
-  );
 
--- briefs: the subject always; the other party only after the subject approved
-create policy "briefs: subject reads" on public.briefs
-  for select using (auth.uid() = subject_id);
-create policy "briefs: other party reads approved" on public.briefs
-  for select using (
-    subject_approved and exists (
-      select 1 from public.introductions i
-      where i.id = intro_id and (i.single_id = auth.uid() or i.candidate_id = auth.uid())
-    )
-  );
-create policy "briefs: subject approves" on public.briefs
-  for update using (auth.uid() = subject_id) with check (auth.uid() = subject_id);
+-- briefs: the requester only. Never the subject, never a Mashmaker.
+create policy "briefs: requester reads" on public.briefs
+  for select using (auth.uid() = requester_id);
 
--- blocks and reports
 create policy "blocks: own" on public.blocks
   for all using (auth.uid() = blocker_id) with check (auth.uid() = blocker_id);
 create policy "reports: own insert" on public.reports
@@ -615,7 +755,6 @@ create policy "reports: own insert" on public.reports
 create policy "reports: own read" on public.reports
   for select using (auth.uid() = reporter_id);
 
--- push tokens and notifications
 create policy "push_tokens: own" on public.push_tokens
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "notifications: own read" on public.notifications
@@ -624,14 +763,15 @@ create policy "notifications: own update" on public.notifications
   for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
--- Realtime: lineups, entries, comments, messages, notifications
+-- Realtime
 -- ---------------------------------------------------------------------------
-alter publication supabase_realtime add table public.lineups;
-alter publication supabase_realtime add table public.lineup_entries;
-alter publication supabase_realtime add table public.lineup_comments;
+alter publication supabase_realtime add table public.batches;
+alter publication supabase_realtime add table public.batch_entries;
+alter publication supabase_realtime add table public.batch_comments;
 alter publication supabase_realtime add table public.messages;
 alter publication supabase_realtime add table public.notifications;
-alter publication supabase_realtime add table public.introductions;
+alter publication supabase_realtime add table public.mashes;
+alter publication supabase_realtime add table public.mashmaker_links;
 
 -- ---------------------------------------------------------------------------
 -- Storage: profile photos
@@ -653,7 +793,6 @@ create policy "avatars: owner deletes" on storage.objects
 -- RPCs the app calls directly
 -- ---------------------------------------------------------------------------
 
--- The weekly rotating prompt. Deterministic per ISO week so everyone sees the same one.
 create or replace function public.current_vouch_prompt()
 returns public.vouch_prompts language sql stable as $$
   select * from public.vouch_prompts where active
@@ -662,7 +801,7 @@ returns public.vouch_prompts language sql stable as $$
   limit 1;
 $$;
 
--- Delete everything about me. Required for App Store review of dating apps.
+-- Leaving is one tap. Everything cascades.
 create or replace function public.delete_my_account()
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -670,96 +809,114 @@ begin
 end;
 $$;
 
--- Home screen for a single: everyone vouching for them and what they wrote.
-create or replace function public.my_circle()
+-- A Catch's home: their Mashmakers (accepted and requested) and what they wrote.
+create or replace function public.my_mashmakers()
 returns table (
-  voucher_id uuid, first_name text, photo_url text, prompt text, text text, how_known text, created_at timestamptz
+  link_id uuid, mashmaker_id uuid, first_name text, photo_url text, status public.link_status,
+  requested_by uuid, prompt text, text text, how_known text, created_at timestamptz
 ) language sql stable security invoker as $$
-  select v.voucher_id, p.first_name, p.photo_url, v.prompt, v.text, v.how_known, v.created_at
-  from public.vouches v join public.profiles p on p.id = v.voucher_id
-  where v.single_id = auth.uid()
-  order by v.created_at desc;
+  select l.id, l.mashmaker_id, p.first_name, p.photo_url, l.status, l.requested_by,
+    v.prompt, v.text, v.how_known, l.created_at
+  from public.mashmaker_links l
+  join public.profiles p on p.id = l.mashmaker_id
+  left join public.vouches v on v.mashmaker_id = l.mashmaker_id and v.catch_id = l.catch_id
+  where l.catch_id = auth.uid() and l.status in ('requested', 'accepted')
+  order by (l.status = 'accepted') desc, l.created_at desc;
 $$;
 
--- Voucher home: the singles I vouch for, with their circle size and lineup count.
-create or replace function public.my_singles()
+-- A Mashmaker's home: the Catches they Mashmake for, and requests waiting on them.
+create or replace function public.my_catches()
 returns table (
-  single_id uuid, first_name text, photo_url text, city text, circle_size int, lineups int, last_lineup_at timestamptz
+  link_id uuid, catch_id uuid, first_name text, photo_url text, city text, status public.link_status,
+  requested_by uuid, has_vouch boolean, open_batch boolean, batches int, last_batch_at timestamptz
 ) language sql stable security invoker as $$
-  select p.id, p.first_name, p.photo_url, p.city,
-    public.circle_size(p.id),
-    (select count(*)::int from public.lineups l where l.single_id = p.id and l.voucher_id = auth.uid()),
-    (select max(l.created_at) from public.lineups l where l.single_id = p.id and l.voucher_id = auth.uid())
-  from public.vouches v join public.profiles p on p.id = v.single_id
-  where v.voucher_id = auth.uid()
-  order by v.created_at desc;
+  select l.id, p.id, p.first_name, p.photo_url, p.city, l.status, l.requested_by,
+    exists (select 1 from public.vouches v where v.mashmaker_id = auth.uid() and v.catch_id = p.id),
+    exists (select 1 from public.batches b where b.catch_id = p.id and b.status in ('building', 'consenting', 'ready')),
+    (select count(*)::int from public.batches b where b.catch_id = p.id and b.mashmaker_id = auth.uid()),
+    (select max(b.created_at) from public.batches b where b.catch_id = p.id and b.mashmaker_id = auth.uid())
+  from public.mashmaker_links l
+  join public.profiles p on p.id = l.catch_id
+  where l.mashmaker_id = auth.uid() and l.status in ('requested', 'accepted')
+  order by (l.status = 'requested') desc, l.created_at desc;
 $$;
 
--- Candidates a voucher can put on a lineup for a single: the voucher's connections who
--- are singles, not paused, not the single, not blocked, not already introduced.
-create or replace function public.nominatable_for(single uuid)
+-- Candidates a Mashmaker may nominate for a Catch: their own connections who are Catches,
+-- open to matching, not paused, compatible by gender and intent, not excluded or blocked,
+-- not already mashed with this Catch. The Machine's matching assist works from this list.
+create or replace function public.nominatable_for(catch uuid)
 returns table (candidate_id uuid, first_name text, photo_url text, city text, age int)
 language sql stable security definer set search_path = public as $$
-  select p.id, p.first_name, p.photo_url, p.city,
-    date_part('year', age(p.date_of_birth))::int
+  select p.id, p.first_name, p.photo_url, p.city, date_part('year', age(p.date_of_birth))::int
   from public.profiles p
-  where p.id <> single
+  join public.profiles c on c.id = catch
+  where p.id <> catch
     and p.id <> auth.uid()
-    and p.role = 'single'
+    and p.role = 'catch'
     and p.onboarding_complete
+    and p.open_to_matching
     and not p.paused
+    and public.is_mashmaker_of(auth.uid(), catch)
     and public.are_connected(auth.uid(), p.id)
-    and not public.is_blocked_either_way(single, p.id)
+    and not public.is_blocked_either_way(catch, p.id)
+    and not public.is_excluded_either_way(catch, p.id)
+    and (c.gender is null or p.seeking = '{}' or c.gender = any(p.seeking))
+    and (p.gender is null or c.seeking = '{}' or p.gender = any(c.seeking))
+    -- not already in an open mash together, and not re-nominated inside the block period
     and not exists (
-      select 1 from public.introductions i
-      where (i.single_id = single and i.candidate_id = p.id) or (i.single_id = p.id and i.candidate_id = single)
+      select 1 from public.mashes m
+      where ((m.catch_id = catch and m.candidate_id = p.id) or (m.catch_id = p.id and m.candidate_id = catch))
+        and (
+          m.status in ('pending', 'mutual', 'met')
+          or coalesce(m.closed_at, m.created_at) > now() - make_interval(
+            months => coalesce((select value from public.app_settings where key = 'renomination_block_months'), '12')::int)
+        )
     )
-    and exists (select 1 from public.vouches v where v.voucher_id = auth.uid() and v.single_id = single)
+    -- not already sitting in an open batch for this Catch
+    and not exists (
+      select 1 from public.batch_entries e join public.batches b on b.id = e.batch_id
+      where b.catch_id = catch and b.status <> 'done' and e.candidate_id = p.id and e.kept
+    )
   order by p.first_name;
 $$;
 
--- The quiet private record: introductions I made and what came of them. No numbers.
+-- The quiet private record: mashes I made and what came of them, at the level each Catch shared.
 create or replace function public.my_record()
 returns table (
-  intro_id uuid, single_first_name text, candidate_first_name text, status public.intro_status,
-  latest_outcome public.outcome_kind, created_at timestamptz
+  mash_id uuid, catch_first_name text, candidate_first_name text, status public.mash_status,
+  shared_outcome public.outcome_kind, created_at timestamptz
 ) language sql stable security definer set search_path = public as $$
-  select i.id, s.first_name, c.first_name, i.status,
-    (select o.outcome from public.outcomes o where o.intro_id = i.id order by o.created_at desc limit 1),
-    i.created_at
-  from public.introductions i
-  join public.profiles s on s.id = i.single_id
-  join public.profiles c on c.id = i.candidate_id
-  where auth.uid() = any(i.voucher_ids)
-  order by i.created_at desc;
+  select m.id, c.first_name, d.first_name, m.status,
+    (select o.outcome from public.outcomes o where o.mash_id = m.id and o.share <> 'nothing' order by o.created_at desc limit 1),
+    m.created_at
+  from public.mashes m
+  join public.profiles c on c.id = m.catch_id
+  join public.profiles d on d.id = m.candidate_id
+  where auth.uid() = any(m.mashmaker_ids)
+  order by m.created_at desc;
+$$;
+
+-- Pending mashes past their time. Run on a schedule (the nudge function calls it).
+-- "This one timed out." Nothing else, to anyone.
+create or replace function public.expire_open_mashes()
+returns int language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  with x as (
+    update public.mashes set status = 'expired', closed_at = now()
+    where status = 'pending' and expires_at is not null and expires_at < now()
+    returning id
+  ) select count(*) into n from x;
+  delete from public.briefs b using public.mashes m where b.mash_id = m.id and m.status in ('expired', 'closed', 'declined');
+  return n;
+end;
 $$;
 
 grant execute on function public.current_vouch_prompt() to authenticated;
 grant execute on function public.delete_my_account() to authenticated;
-grant execute on function public.my_circle() to authenticated;
-grant execute on function public.my_singles() to authenticated;
+grant execute on function public.my_mashmakers() to authenticated;
+grant execute on function public.my_catches() to authenticated;
 grant execute on function public.nominatable_for(uuid) to authenticated;
 grant execute on function public.my_record() to authenticated;
-grant execute on function public.circle_size(uuid) to authenticated;
-
--- ---------------------------------------------------------------------------
--- Protected profile columns. Only the service role (edge functions, billing webhooks)
--- may change entitlements, verification flags or the phone hash. A client update
--- that touches them is silently reverted to the old value.
--- ---------------------------------------------------------------------------
-create or replace function public.protect_profile_columns()
-returns trigger language plpgsql as $$
-begin
-  if coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then
-    new.is_plus := old.is_plus;
-    new.plus_until := old.plus_until;
-    new.verified_photo := old.verified_photo;
-    new.verified_social := old.verified_social;
-    new.phone_hash := old.phone_hash;
-  end if;
-  return new;
-end;
-$$;
-
-create trigger profiles_protect before update on public.profiles
-  for each row execute function public.protect_profile_columns();
+grant execute on function public.is_entitled(uuid) to authenticated;
+grant execute on function public.is_mashmaker_of(uuid, uuid) to authenticated;

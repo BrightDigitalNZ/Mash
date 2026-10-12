@@ -1,12 +1,22 @@
 // POST { hashes: string[], myPhoneHash?: string }
 // Stores the caller's contact hashes, finds who in their contacts is already on Mash
-// (both directions: people I have, and people who have me), creates connections,
-// and resolves any pending nominations addressed to the caller's own phone hash.
+// (both directions), creates connections, and resolves pending invites addressed to the
+// caller's own phone hash. Re-sync is explicit: the app calls this only when the user asks.
 //
-// Returns { matched: PublicProfile[], pendingInvites: {voucher_first_name, invite_message}[] }
+// Non-users stay invisible: nothing is created for a hash that matches nobody.
+// Returns { matched: PublicProfile[], pendingInvites: {inviter_first_name, message}[] }
 
-import { admin, handler, json, readBody, requireUser, HttpError, ageFrom } from '../_shared/supabase.ts';
+import {
+  admin,
+  handler,
+  json,
+  readBody,
+  requireUser,
+  HttpError,
+  ageFrom,
+} from '../_shared/supabase.ts';
 import { notify } from '../_shared/push.ts';
+import { orderedPair } from '../_shared/rules.ts';
 
 interface Body {
   hashes: string[];
@@ -14,42 +24,43 @@ interface Body {
 }
 
 const MAX_HASHES = 5000;
+const HEX64 = /^[a-f0-9]{64}$/;
 
 Deno.serve(
   handler(async (req) => {
     const userId = await requireUser(req);
     const body = await readBody<Body>(req);
-
     if (!Array.isArray(body.hashes)) throw new HttpError(400, 'hashes must be an array');
-    const hashes = Array.from(new Set(body.hashes.filter((h) => typeof h === 'string' && /^[a-f0-9]{64}$/.test(h)))).slice(
-      0,
-      MAX_HASHES,
-    );
+    const hashes = Array.from(
+      new Set(body.hashes.filter((h) => typeof h === 'string' && HEX64.test(h))),
+    ).slice(0, MAX_HASHES);
 
-    // 1. Save my own phone hash so friends can find me.
-    if (body.myPhoneHash && /^[a-f0-9]{64}$/.test(body.myPhoneHash)) {
+    if (body.myPhoneHash && HEX64.test(body.myPhoneHash)) {
       await admin.from('profiles').update({ phone_hash: body.myPhoneHash }).eq('id', userId);
     }
 
-    // 2. Replace my contact hashes.
     await admin.from('contact_hashes').delete().eq('owner_id', userId);
-    if (hashes.length > 0) {
-      const rows = hashes.map((hash) => ({ owner_id: userId, hash }));
-      for (let i = 0; i < rows.length; i += 1000) {
-        const { error } = await admin.from('contact_hashes').insert(rows.slice(i, i + 1000));
-        if (error) throw error;
-      }
+    for (let i = 0; i < hashes.length; i += 1000) {
+      const { error } = await admin
+        .from('contact_hashes')
+        .insert(hashes.slice(i, i + 1000).map((hash) => ({ owner_id: userId, hash })));
+      if (error) throw error;
     }
 
-    // 3. People in my contacts who are on Mash.
     const { data: iHave } = hashes.length
       ? await admin.from('profiles').select('id').in('phone_hash', hashes).neq('id', userId)
       : { data: [] as { id: string }[] };
-
-    // 4. People who have me in their contacts.
-    const { data: me } = await admin.from('profiles').select('phone_hash').eq('id', userId).single();
+    const { data: me } = await admin
+      .from('profiles')
+      .select('phone_hash, first_name, role')
+      .eq('id', userId)
+      .single();
     const { data: haveMe } = me?.phone_hash
-      ? await admin.from('contact_hashes').select('owner_id').eq('hash', me.phone_hash).neq('owner_id', userId)
+      ? await admin
+          .from('contact_hashes')
+          .select('owner_id')
+          .eq('hash', me.phone_hash)
+          .neq('owner_id', userId)
       : { data: [] as { owner_id: string }[] };
 
     const others = new Set<string>([
@@ -57,52 +68,64 @@ Deno.serve(
       ...(haveMe ?? []).map((c: { owner_id: string }) => c.owner_id),
     ]);
 
-    // 5. Upsert connections (normalised a < b).
     if (others.size > 0) {
       const rows = Array.from(others).map((other) => ({
-        user_a: userId < other ? userId : other,
-        user_b: userId < other ? other : userId,
+        ...orderedPair(userId, other),
         source: 'contacts',
       }));
-      const { error } = await admin.from('connections').upsert(rows, { onConflict: 'user_a,user_b', ignoreDuplicates: true });
+      const { error } = await admin
+        .from('connections')
+        .upsert(rows, { onConflict: 'user_a,user_b', ignoreDuplicates: true });
       if (error) throw error;
     }
 
-    // 6. Pending nominations addressed to me: resolve them and tell the voucher.
-    const pendingInvites: { voucher_first_name: string; invite_message: string | null }[] = [];
+    const pendingInvites: { inviter_first_name: string; message: string | null }[] = [];
     if (me?.phone_hash) {
-      const { data: noms } = await admin
-        .from('nominations')
-        .select('id, voucher_id, invite_message, profiles:voucher_id(first_name)')
-        .eq('nominee_hash', me.phone_hash)
+      const { data: invites } = await admin
+        .from('invites')
+        .select('id, inviter_id, message, profiles:inviter_id(first_name, role)')
+        .eq('invitee_hash', me.phone_hash)
         .eq('status', 'pending');
-      for (const n of noms ?? []) {
+      for (const inv of invites ?? []) {
         await admin
-          .from('nominations')
-          .update({ nominee_user_id: userId, status: 'accepted', accepted_at: new Date().toISOString() })
-          .eq('id', n.id);
-        await admin.from('connections').upsert(
-          {
-            user_a: userId < n.voucher_id ? userId : n.voucher_id,
-            user_b: userId < n.voucher_id ? n.voucher_id : userId,
-            source: 'invite',
-          },
-          { onConflict: 'user_a,user_b', ignoreDuplicates: true },
-        );
-        const voucherName = (n.profiles as unknown as { first_name: string } | null)?.first_name ?? 'A friend';
-        pendingInvites.push({ voucher_first_name: voucherName, invite_message: n.invite_message });
-        const { data: meProfile } = await admin.from('profiles').select('first_name').eq('id', userId).single();
-        await notify(n.voucher_id, 'invite_accepted', `${meProfile?.first_name ?? 'Your friend'} joined Mash from your invite.`, {
-          route: '/(voucher)/friends',
+          .from('invites')
+          .update({
+            invitee_user_id: userId,
+            status: 'accepted',
+            accepted_at: new Date().toISOString(),
+          })
+          .eq('id', inv.id);
+        await admin
+          .from('connections')
+          .upsert(
+            { ...orderedPair(userId, inv.inviter_id), source: 'invite' },
+            { onConflict: 'user_a,user_b', ignoreDuplicates: true },
+          );
+        const inviter = inv.profiles as unknown as {
+          first_name: string;
+          role: string | null;
+        } | null;
+        pendingInvites.push({
+          inviter_first_name: inviter?.first_name ?? 'A friend',
+          message: inv.message,
         });
+        await notify(
+          inv.inviter_id,
+          'invite_accepted',
+          `${me.first_name || 'Your friend'} joined Mash from your invite.`,
+          {
+            route: inviter?.role === 'catch' ? '/(catch)/mashmakers' : '/(mashmaker)/catches',
+          },
+        );
       }
     }
 
-    // 7. Return the matched people as public cards.
     const { data: matched } = others.size
       ? await admin
           .from('profiles')
-          .select('id, first_name, photo_url, city, bio, verified_photo, verified_social, date_of_birth, role, phone_hash')
+          .select(
+            'id, first_name, photo_url, city, bio, verified_identity, photos_current, date_of_birth, role, phone_hash',
+          )
           .in('id', Array.from(others))
       : { data: [] };
 
@@ -113,11 +136,10 @@ Deno.serve(
         photo_url: p.photo_url,
         city: p.city,
         bio: p.bio,
-        verified_photo: p.verified_photo,
-        verified_social: p.verified_social,
+        verified_identity: p.verified_identity,
+        photos_current: p.photos_current,
         role: p.role,
         age: ageFrom(p.date_of_birth as string | null),
-        // the hash the caller's contacts matched on, so the app can skip inviting them
         hash: hashes.includes(p.phone_hash as string) ? (p.phone_hash as string) : null,
       })),
       pendingInvites,

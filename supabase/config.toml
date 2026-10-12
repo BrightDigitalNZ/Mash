@@ -43,11 +43,11 @@ file_size_limit = "10MiB"
 
 [functions.match-contacts]
 verify_jwt = true
-[functions.build-lineup]
+[functions.build-batch]
 verify_jwt = true
 [functions.decide]
 verify_jwt = true
 [functions.brief]
 verify_jwt = true
-[functions.nudge-vouchers]
+[functions.nudge-mashmakers]
 verify_jwt = false

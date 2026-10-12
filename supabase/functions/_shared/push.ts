@@ -4,13 +4,16 @@
 import { admin } from './supabase.ts';
 
 export type NotificationKind =
-  | 'lineup_ready'
-  | 'intro_mutual'
+  | 'batch_ready'
+  | 'consent_request'
+  | 'mash_mutual'
   | 'outcome'
   | 'nudge'
   | 'vouch_received'
   | 'comment'
   | 'invite_accepted'
+  | 'mashmaker_request'
+  | 'mashmaker_accepted'
   | 'system';
 
 interface ExpoMessage {
@@ -59,9 +62,13 @@ export async function notify(
   }
 
   // Drop tokens Expo says are dead.
-  const result = (await res.json()) as { data?: { status: string; details?: { error?: string } }[] };
+  const result = (await res.json()) as {
+    data?: { status: string; details?: { error?: string } }[];
+  };
   const dead = (result.data ?? [])
-    .map((r, i) => (r.status === 'error' && r.details?.error === 'DeviceNotRegistered' ? tokens[i]?.token : null))
+    .map((r, i) =>
+      r.status === 'error' && r.details?.error === 'DeviceNotRegistered' ? tokens[i]?.token : null,
+    )
     .filter((t): t is string => !!t);
   if (dead.length > 0) {
     await admin.from('push_tokens').delete().eq('user_id', userId).in('token', dead);
